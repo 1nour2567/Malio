@@ -1,0 +1,35 @@
+{
+  "joyful": {
+    "color": "#E6C200", "speed": 1.3, "density": 0.7, "amplitude": 0.3,
+    "brightness": 1.0, "note": "暖黄，激活多巴胺，心率微升"
+  },
+  "melancholy": {
+    "color": "#756BB1", "speed": 0.7, "density": 0.4, "amplitude": 0.1,
+    "brightness": 0.5, "note": "蓝紫，降低皮质醇，心率下降，需共情而非强行提亮"
+  },
+  "calm_focus": {
+    "color": "#27AE60", "speed": 0.6, "density": 0.3, "amplitude": 0.05,
+    "brightness": 0.7, "note": "平衡绿，促进血清素，适合深夜或工作背景"
+  },
+  "energetic": {
+    "color": "#00D4AA", "speed": 1.8, "density": 0.9, "amplitude": 0.5,
+    "brightness": 1.0, "note": "高能青，激活交感神经，适合运动或派对场景"
+  },
+  "night_calm": {
+    "color": "#1A5B3A", "speed": 0.5, "density": 0.2, "amplitude": 0.03,
+    "brightness": 0.4, "note": "深夜暗绿，减少蓝光刺激，保护褪黑素分泌"
+  },
+  "rainy_introspect": {
+    "color": "#5B7FA5", "speed": 0.9, "density": 0.6, "amplitude": 0.08,
+    "brightness": 0.5, "note": "雨灰色调，低饱和蓝灰，配合雨声白噪音"
+  },
+
+  "_rules": {
+    "time_of_day": {
+      "morning":   { "tag": "joyful",           "lerp": 0.03 },
+      "afternoon": { "tag": "calm_focus",        "lerp": 0.05 },
+      "evening":   { "tag": "joyful",           "lerp": 0.03 },
+      "night":     { "tag": "night_calm",        "lerp": 0.03 }
+    }
+  }
+}

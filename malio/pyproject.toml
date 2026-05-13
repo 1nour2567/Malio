@@ -1,0 +1,25 @@
+[project]
+name = "malio-music-agent"
+version = "0.1.0"
+description = "AI music agent that provides personalized music recommendations"
+authors = [
+    { name = "User", email = "user@example.com" },
+]
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic>=0.54.0",
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "requests>=2.31.0",
+    "sqlalchemy>=2.0.0",
+]
+
+[project.scripts]
+malio = "main:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

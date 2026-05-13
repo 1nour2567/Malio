@@ -1,0 +1,98 @@
+[
+  {
+    "id": "song_001",
+    "title": "颜色",
+    "artist": ["许美静"],
+    "album": "都是夜归人",
+    "genre": ["华语流行", "抒情"],
+    "release_year": 1997,
+    "duration": 258,
+    "features": {
+      "tempo": 78.5,
+      "energy": 0.35,
+      "valence": 0.45,
+      "danceability": 0.25,
+      "acousticness": 0.8
+    }
+  },
+  {
+    "id": "song_002",
+    "title": "Canon in D",
+    "artist": ["Johann Pachelbel"],
+    "album": "Classical Masterpieces",
+    "genre": ["古典", "轻音乐"],
+    "release_year": 1680,
+    "duration": 360,
+    "features": {
+      "tempo": 60.0,
+      "energy": 0.2,
+      "valence": 0.6,
+      "danceability": 0.1,
+      "acousticness": 0.95
+    }
+  },
+  {
+    "id": "song_003",
+    "title": "Happy",
+    "artist": ["Pharrell Williams"],
+    "album": "G I R L",
+    "genre": ["流行", "R&B"],
+    "release_year": 2013,
+    "duration": 242,
+    "features": {
+      "tempo": 156.0,
+      "energy": 0.85,
+      "valence": 0.95,
+      "danceability": 0.8,
+      "acousticness": 0.1
+    }
+  },
+  {
+    "id": "song_004",
+    "title": "晴天",
+    "artist": ["周杰伦"],
+    "album": "叶惠美",
+    "genre": ["流行"],
+    "release_year": 2003,
+    "duration": 263,
+    "features": {
+      "tempo": 135.0,
+      "energy": 0.6,
+      "valence": 0.7,
+      "danceability": 0.65,
+      "acousticness": 0.3
+    }
+  },
+  {
+    "id": "song_005",
+    "title": "平凡之路",
+    "artist": ["朴树"],
+    "album": "平凡之路",
+    "genre": ["民谣"],
+    "release_year": 2014,
+    "duration": 318,
+    "features": {
+      "tempo": 85.0,
+      "energy": 0.4,
+      "valence": 0.5,
+      "danceability": 0.4,
+      "acousticness": 0.7
+    }
+  },
+  {
+    "id": "song_006",
+    "title": "孤勇者",
+    "artist": ["陈奕迅"],
+    "album": "孤勇者",
+    "genre": ["流行"],
+    "release_year": 2021,
+    "duration": 256,
+    "features": {
+      "tempo": 120.0,
+      "energy": 0.8,
+      "valence": 0.6,
+      "danceability": 0.55,
+      "acousticness": 0.2
+    }
+  }
+]
