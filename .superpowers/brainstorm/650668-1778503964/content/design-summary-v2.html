@@ -1,0 +1,75 @@
+<div style="text-align:center; padding:20px 0;">
+  <h2>Malio — 设计概要 v2（含工程风险应对）</h2>
+  <p style="color:var(--clr-muted);">AI 私人电台 DJ · Agent 架构 · 深色 Matrix 主题</p>
+</div>
+
+<h3>一、Agent 架构</h3>
+<table style="width:100%; font-size:13px;">
+  <tr><td style="padding:4px;width:100px;color:var(--clr-accent);">Perception</td><td style="padding:4px;">用户消息 + 环境上下文 + 偏好历史</td></tr>
+  <tr><td style="padding:4px;color:var(--clr-accent);">Routing</td><td style="padding:4px;">显式命令直执行 / 自然语言转 Reasoning</td></tr>
+  <tr><td style="padding:4px;color:var(--clr-accent);">Reasoning</td><td style="padding:4px;">Plan-and-Solve 三段式 + ReAct 交替循环</td></tr>
+  <tr><td style="padding:4px;color:var(--clr-accent);">Tool Use</td><td style="padding:4px;">Tool Registry：搜索 / 播放 / 曲库 / TTS / 天气</td></tr>
+  <tr><td style="padding:4px;color:var(--clr-accent);">Feedback</td><td style="padding:4px;">DJ 口吻 + 更新播放列表 + WS 推送状态快照</td></tr>
+</table>
+
+<h3>二、关键工程风险 & 应对（原型阶段最高优先级）</h3>
+
+<div style="background:rgba(239,68,68,0.06); border:1px solid rgba(239,68,68,0.2); border-radius:8px; padding:12px; margin:8px 0;">
+<h4>⚠️ 1. WebSocket 状态同步</h4>
+<p style="font-size:13px;color:var(--clr-muted);">前端 + Agent + 外部 API 三端状态，断线重连后如何恢复？</p>
+<p style="font-size:13px;"><strong>方案：</strong>Agent 通过 WS 推送不可变的状态快照（snapshot），不是零散 delta。前端只负责渲染快照，不维护派生状态。重连后服务端重推最新快照。</p>
+<p style="font-size:12px;color:var(--clr-muted);">协议：{type:"state_snapshot", song, playlist, agent_log, timestamp, seq}</p>
+</div>
+
+<div style="background:rgba(234,179,8,0.06); border:1px solid rgba(234,179,8,0.2); border-radius:8px; padding:12px; margin:8px 0;">
+<h4>⚠️ 2. Agent 推理时延 vs 前端体验</h4>
+<p style="font-size:13px;color:var(--clr-muted);">Plan+Solve+ReAct 可能数秒，界面不能僵死。</p>
+<p style="font-size:13px;"><strong>方案：</strong>Agent 进入 Reasoning 第一步，立刻通过 WS 推一条日志——"Malio 正在感受你的情绪…决定为你选一些明亮的调子"。前端收到立即显示，不等最终结果。把最长的时延变成 AI 思考秀。</p>
+</div>
+
+<div style="background:rgba(59,130,246,0.06); border:1px solid rgba(59,130,246,0.2); border-radius:8px; padding:12px; margin:8px 0;">
+<h4>⚠️ 3. Canvas 粒子绕流性能</h4>
+<p style="font-size:13px;color:var(--clr-muted);">256 粒子 × 碰撞检测，中低端手机可能掉帧。</p>
+<p style="font-size:13px;"><strong>方案：</strong>开发初期加 FPS 计数器。FPS 持续 &lt; 30 → 自动熔断，停止绕流，改为简单透明度避让或粒子穿透。动画底线永远是流畅，不是效果炫。</p>
+</div>
+
+<div style="background:rgba(34,197,94,0.06); border:1px solid rgba(34,197,94,0.2); border-radius:8px; padding:12px; margin:8px 0;">
+<h4>⚠️ 4. 用户状态文件演进</h4>
+<p style="font-size:13px;color:var(--clr-muted);">taste.md / routines.md / mood-rules.md 初期用文件够用，后期何时切数据库？</p>
+<p style="font-size:13px;"><strong>方案：</strong>Phase 1-2 用 JSON/Markdown 文件，结构清晰易调试。访问频繁时切 SQLite + 版本控制，防止错误推理覆盖用户记忆。这个切换点留到 Phase 3。</p>
+</div>
+
+<h3>三、视觉 & 布局</h3>
+<table style="width:100%; font-size:13px;">
+  <tr><td style="padding:4px;color:var(--clr-accent);width:120px;">主题</td><td style="padding:4px;">OLED 黑 + JetBrains Mono/IBM Plex Sans</td></tr>
+  <tr><td style="padding:4px;color:var(--clr-accent);">代码流底层</td><td style="padding:4px;">Canvas 256 粒子池，左右代码行发射源，播放器绕流 + 20px 消散缓冲区；FPS &lt; 30 自动熔断</td></tr>
+  <tr><td style="padding:4px;color:var(--clr-accent);">动态参数</td><td style="padding:4px;">5-10s 采样，5s 平滑插值。颜色映射表：雀跃→暖黄，满足→暖橙，低落→蓝紫</td></tr>
+  <tr><td style="padding:4px;color:var(--clr-accent);">Agent 日志</td><td style="padding:4px;">磨砂玻璃底条，底部上浮，3s 渐隐 + 📌 固定/展开按钮</td></tr>
+  <tr><td style="padding:4px;color:var(--clr-accent);">布局</td><td style="padding:4px;">全屏播放器居中 + 侧边滑出面板（桌面40%/移动全屏）</td></tr>
+  <tr><td style="padding:4px;color:var(--clr-accent);">控件</td><td style="padding:4px;">白色/浅灰中性基调，进度条用环境色</td></tr>
+  <tr><td style="padding:4px;color:var(--clr-accent);">移动端</td><td style="padding:4px;">&lt;768px 左右代码→顶部细条；滑动手势；Canvas aria-hidden</td></tr>
+  <tr><td style="padding:4px;color:var(--clr-accent);">离线</td><td style="padding:4px;">PWA + Service Worker</td></tr>
+</table>
+
+<h3>四、DJ 人格（prompts/dj-persona.md）</h3>
+<p style="font-size:13px;">不只是服从，而是有判断力。深夜点快歌时温和提示：<em>"也许一首舒缓的爵士会更适合夜晚？"</em> —— 这是 AI DJ 和播放器的本质区别。</p>
+
+<h3>五、项目结构</h3>
+<pre style="background:#0D0D0D;color:#A0A0A0;padding:12px;border-radius:8px;font-size:12px;">
+malio/
+├── src/agent/      perception / router / reasoner / tools / feedback
+├── src/memory/     short_term / user_profile / history
+├── src/integrations/  kimi / netease / spotify / tts / weather
+├── src/server.py   FastAPI + WS（状态快照协议）
+├── frontend/       PWA + Canvas 粒子引擎 + FPS 熔断
+├── prompts/dj-persona.md
+├── user/           taste.md / routines.md / mood-rules.md
+└── MALIO_ARCHITECTURE.md
+</pre>
+
+<h3>六、分期</h3>
+<table style="width:100%; font-size:13px;">
+  <tr><td style="padding:4px;color:var(--clr-accent);width:80px;">Phase 1</td><td style="padding:4px;">Agent 五阶段 + P&S prompt + 全屏布局 + Canvas 代码流底层 + FPS 熔断</td></tr>
+  <tr><td style="padding:4px;color:var(--clr-accent);">Phase 2</td><td style="padding:4px;">Agent 日志叠加层 + 动态参数映射 + 绕流手势交互 + DJ 人格边界</td></tr>
+  <tr><td style="padding:4px;color:var(--clr-accent);">Phase 3</td><td style="padding:4px;">移动端适配 + PWA 离线 + Spotify + SQLite 迁移</td></tr>
+</table>

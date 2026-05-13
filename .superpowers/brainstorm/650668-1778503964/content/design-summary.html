@@ -1,0 +1,60 @@
+<div style="text-align:center; padding:20px 0;">
+  <h2>Malio — 设计概要</h2>
+  <p style="color:var(--clr-muted);">AI 私人电台 DJ · Agent 架构 · 深色 Matrix 主题</p>
+</div>
+
+<h3>一、Agent 架构（五阶段循环）</h3>
+<table style="width:100%; font-size:13px;">
+  <tr><td style="padding:6px;color:var(--clr-accent);">1. Perception</td><td style="padding:6px;">接收用户消息 + 环境上下文（时间/天气/日程）+ 用户偏好历史</td></tr>
+  <tr><td style="padding:6px;color:var(--clr-accent);">2. Routing</td><td style="padding:6px;">显式命令直执行 / 自然语言转入推理</td></tr>
+  <tr><td style="padding:6px;color:var(--clr-accent);">3. Reasoning</td><td style="padding:6px;">Plan-and-Solve 三段式 + ReAct 交替循环</td></tr>
+  <tr><td style="padding:6px;color:var(--clr-accent);">4. Tool Use</td><td style="padding:6px;">Tool Registry：音乐搜索 / 播放控制 / 音乐库 / TTS / 天气</td></tr>
+  <tr><td style="padding:6px;color:var(--clr-accent);">5. Feedback</td><td style="padding:6px;">DJ 口吻回复 + 更新播放列表 + WebSocket 推送前端</td></tr>
+</table>
+
+<h3>二、视觉系统</h3>
+<table style="width:100%; font-size:13px;">
+  <tr><td style="padding:6px;color:var(--clr-accent);">主题</td><td style="padding:6px;">深色 OLED (#000000)，JetBrains Mono + IBM Plex Sans</td></tr>
+  <tr><td style="padding:6px;color:var(--clr-accent);">代码流底层</td><td style="padding:6px;">Canvas 粒子系统，256 粒子池；左右代码行作为发射源；播放器绕流 + 下方 20px 缓冲区减速虚化消失</td></tr>
+  <tr><td style="padding:6px;color:var(--clr-accent);">绕流算法</td><td style="padding:6px;">径向推离 + 切向速度；碰撞检测用卡片外扩矩形</td></tr>
+  <tr><td style="padding:6px;color:var(--clr-accent);">动态参数</td><td style="padding:6px;">5-10s 采样环境（心情/天气/时间/音乐能量），5s 平滑插值过渡到粒子属性</td></tr>
+  <tr><td style="padding:6px;color:var(--clr-accent);">Agent 日志层</td><td style="padding:6px;">磨砂玻璃底条，底部上浮 16px，停留 3s 自动渐隐；拟人化前缀</td></tr>
+  <tr><td style="padding:6px;color:var(--clr-accent);">播放器控件</td><td style="padding:6px;">白色/浅灰中性基调，进度条用环境色；卡片带微光外发光</td></tr>
+</table>
+
+<h3>三、布局 — 全屏播放器</h3>
+<table style="width:100%; font-size:13px;">
+  <tr><td style="padding:6px;color:var(--clr-accent);">顶部栏（48px）</td><td style="padding:6px;">☰ 菜单 · Malio 品牌 · 🔍 搜索 · 💬 聊天 · ⚙️ 设置</td></tr>
+  <tr><td style="padding:6px;color:var(--clr-accent);">主区域</td><td style="padding:6px;">全屏 Canvas 代码流背景 + 居中播放器卡片（代码流在此绕行）</td></tr>
+  <tr><td style="padding:6px;color:var(--clr-accent);">侧边面板</td><td style="padding:6px;">聊天 / 搜索从右侧滑出，40% 宽度 + 半透明遮罩</td></tr>
+  <tr><td style="padding:6px;color:var(--clr-accent);">Agent 日志</td><td style="padding:6px;">播放器卡片下方，磨砂玻璃悬浮</td></tr>
+  <tr><td style="padding:6px;color:var(--clr-accent);">移动端 (&lt;768px)</td><td style="padding:6px;">左右代码缩为顶部细条；聊天/搜索全屏弹出；Canvas aria-hidden</td></tr>
+</table>
+
+<h3>四、交互</h3>
+<table style="width:100%; font-size:13px;">
+  <tr><td style="padding:6px;color:var(--clr-accent);">桌面端</td><td style="padding:6px;">图标按钮 + 快捷键提示。空格播放/暂停，←→ 切歌，/ 聊天输入，Ctrl+K 搜索</td></tr>
+  <tr><td style="padding:6px;color:var(--clr-accent);">移动端</td><td style="padding:6px;">边缘滑动手势。卡片上左右滑动切歌，粒子跟随偏转</td></tr>
+  <tr><td style="padding:6px;color:var(--clr-accent);">门槛</td><td style="padding:6px;">PWA 可安装到桌面，Service Worker 离线缓存</td></tr>
+</table>
+
+<h3>五、项目结构</h3>
+<pre style="background:#0D0D0D;color:#A0A0A0;padding:12px;border-radius:8px;font-size:12px;">
+malio/
+├── src/agent/           # Perception / Router / Reasoner / Tools / Feedback
+├── src/memory/          # short_term / user_profile / history
+├── src/integrations/    # kimi / netease / spotify(未来) / tts / weather
+├── src/server.py        # FastAPI + WebSocket
+├── src/config.py
+├── frontend/            # PWA：index.html + style.css + app.js + sw.js
+├── prompts/dj-persona.md
+├── user/taste.md routines.md mood-rules.md
+└── MALIO_ARCHITECTURE.md
+</pre>
+
+<h3>六、分期计划</h3>
+<table style="width:100%; font-size:13px;">
+  <tr><td style="padding:6px;color:var(--clr-accent);">Phase 1（现在）</td><td style="padding:6px;">Agent 五阶段架构 + Plan-and-Solve prompt 重构 + 全屏播放器布局 + Matrix 代码流底层</td></tr>
+  <tr><td style="padding:6px;color:var(--clr-accent);">Phase 2</td><td style="padding:6px;">Agent 日志叠加层 + 动态参数映射 + 绕流交互（切歌拨动粒子）</td></tr>
+  <tr><td style="padding:6px;color:var(--clr-accent);">Phase 3</td><td style="padding:6px;">移动端适配 + PWA 离线 + Spotify 接入（HK 开户后）</td></tr>
+</table>

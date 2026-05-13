@@ -1,0 +1,44 @@
+[
+  {
+    "id": "playlist_001",
+    "name": "早晨华语",
+    "description": "适合早上收听的华语歌曲",
+    "created_at": "2020-01-01T08:00:00",
+    "songs": ["song_001"],
+    "context": {
+      "timeOfDay": "morning",
+      "season": "spring",
+      "weather": "sunny",
+      "mood": "energetic",
+      "activity": "commuting"
+    }
+  },
+  {
+    "id": "playlist_002",
+    "name": "工作轻音乐",
+    "description": "适合工作时收听的轻音乐",
+    "created_at": "2020-01-01T10:00:00",
+    "songs": ["song_002"],
+    "context": {
+      "timeOfDay": "afternoon",
+      "season": "spring",
+      "weather": "cloudy",
+      "mood": "focused",
+      "activity": "working"
+    }
+  },
+  {
+    "id": "playlist_003",
+    "name": "快乐时光",
+    "description": "让人快乐的歌曲",
+    "created_at": "2020-01-01T18:00:00",
+    "songs": ["song_003"],
+    "context": {
+      "timeOfDay": "evening",
+      "season": "summer",
+      "weather": "sunny",
+      "mood": "happy",
+      "activity": "socializing"
+    }
+  }
+]

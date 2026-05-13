@@ -1,0 +1,43 @@
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+.env
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Logs
+logs/
+*.log
+
+# Test coverage
+coverage/
+.coverage
+
+# Database
+*.db
+
+# Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# Local env files
+malio/.env

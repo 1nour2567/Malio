@@ -1,0 +1,31 @@
+<div class="option" data-option="A">
+  <h2>A — 背景代码雨（纯装饰）</h2>
+  <p>播放器主界面背后有一层半透明的绿色代码瀑布，像 Matrix 片头那样垂直下落。频率和速度随天气/心情变化：<br>
+  <b>晴天 + 开心</b> → 稀疏、慢速、淡绿色<br>
+  <b>阴雨 + 忧郁</b> → 密集、快速、深蓝色</p>
+  <p style="color:var(--clr-muted)">✅ 视觉效果好，不干扰操作<br>❌ 和"AI agent 思考过程"没有直接关联</p>
+</div>
+
+<div class="option" data-option="B">
+  <h2>B — Agent 日志流（可读的代码/文字流）</h2>
+  <p>代码雨的内容不是随机字符，而是 Agent 的实时思考过程：<br>
+  "分析用户意图 → 情绪识别: 低落 → 搜索: 温暖华语民谣 → 找到 5 首候选..."<br>
+  像终端日志一样一条条往下落，用户能<b>看懂 Agent 在想什么</b>。</p>
+  <p style="color:var(--clr-muted)">✅ Agent 可解释性 + 视觉结合<br>✅ 解决了你说过的"黑箱问题"<br>❌ 实现比纯装饰复杂</p>
+</div>
+
+<div class="option" data-option="C">
+  <h2>C — 双层叠加（A + B 混合）</h2>
+  <p>底层是稀疏的 Matrix 风格字符雨（纯装饰），上层是半透明悬浮的 Agent 思考流（可读日志）。<br>
+  底层速度 = f(天气, 心情)，上层内容 = Agent 实时输出。<br>
+  两个图层独立控制，视觉上不冲突。</p>
+  <p style="color:var(--clr-muted)">✅ 既有氛围又有信息<br>✅ 你可以选择开/关某一层<br>❌ 实现最复杂，但分两层做可以逐步来</p>
+</div>
+
+<div class="option" data-option="D">
+  <h2>D — 边缘粒子流（更克制的做法）</h2>
+  <p>代码流不铺满整个背景，只出现在屏幕边缘（顶部、底部、左右两侧），<br>
+  像电流一样在边缘流过，颜色随环境参数渐变。<br>
+  核心播放器区域保持干净，不被干扰。</p>
+  <p style="color:var(--clr-muted)">✅ 不干扰主界面操作<br>✅ 比全屏雨更省性能<br>❌ 视觉冲击力不如 A/B</p>
+</div>

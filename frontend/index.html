@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <meta name="description" content="Malio — AI-powered music player">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%2322C55E'/><text x='16' y='20' text-anchor='middle' font-size='14' font-weight='700' fill='%23000'>M</text></svg>">
+  <title>Malio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+
+  <!-- ===== Background Particle Canvas ===== -->
+  <canvas id="particle-canvas" aria-hidden="true"></canvas>
+
+  <!-- ===== Top Bar ===== -->
+  <header class="top-bar" id="top-bar">
+    <div class="top-bar-left">
+      <button class="top-bar-btn" id="btn-menu" aria-label="Menu" title="Menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
+      </button>
+      <span class="top-bar-brand">Malio</span>
+    </div>
+    <div class="top-bar-right">
+      <button class="top-bar-btn" id="btn-search-toggle" aria-label="Search" title="Search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      </button>
+      <button class="top-bar-btn" id="btn-chat-toggle" aria-label="Chat" title="Chat">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      </button>
+      <button class="top-bar-btn" id="btn-settings-toggle" aria-label="Settings" title="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ===== Agent Log Bar (hidden by default) ===== -->
+  <div class="agent-log" id="agent-log" hidden>
+    <span class="agent-log-prefix">Malio</span>
+    <span class="agent-log-text" id="agent-log-text">Ready</span>
+    <button class="agent-log-pin" id="agent-log-pin" aria-label="Pin log" title="Pin">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2z"/></svg>
+    </button>
+  </div>
+
+  <!-- ===== Main Player Area ===== -->
+  <main class="player-area">
+    <div class="player-center">
+      <div class="player-card" id="player-card">
+
+        <!-- Album Art -->
+        <div class="album-art-wrapper" id="album-art-wrapper">
+          <div class="album-art-placeholder" id="album-art-placeholder">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/><path d="M12 2a10 10 0 0 1 7 17"/></svg>
+          </div>
+          <img class="album-art-img" id="album-art-img" src="" alt="Album art" hidden>
+        </div>
+
+        <!-- Song Info -->
+        <div class="song-info">
+          <h2 class="song-title" id="song-title">—</h2>
+          <p class="song-artist" id="song-artist">No track playing</p>
+        </div>
+
+        <!-- Progress Bar -->
+        <div class="progress-container">
+          <div class="progress-bar" id="progress-bar">
+            <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+            <div class="progress-thumb" id="progress-thumb" style="left: 0%"></div>
+          </div>
+          <div class="progress-time">
+            <span class="time-elapsed" id="time-elapsed">0:00</span>
+            <span class="time-total" id="time-total">0:00</span>
+          </div>
+        </div>
+
+        <!-- Player Controls -->
+        <div class="player-controls">
+          <button class="ctrl-btn" id="btn-prev" aria-label="Previous track">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
+          </button>
+          <button class="ctrl-btn ctrl-btn-play" id="btn-play" aria-label="Play / Pause">
+            <svg id="icon-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            <svg id="icon-pause" viewBox="0 0 24 24" fill="currentColor" hidden><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+          </button>
+          <button class="ctrl-btn" id="btn-next" aria-label="Next track">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+          </button>
+        </div>
+
+        <!-- Volume Slider -->
+        <div class="volume-container">
+          <svg class="volume-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M19.07 4.93a10 10 0 010 14.14"/></svg>
+          <input type="range" class="volume-slider" id="volume-slider" min="0" max="100" value="70" aria-label="Volume">
+        </div>
+
+      </div>
+    </div>
+  </main>
+
+  <!-- ===== Side Panels ===== -->
+
+  <!-- Chat Panel -->
+  <aside class="side-panel chat-panel" id="chat-panel" hidden>
+    <div class="side-panel-header">
+      <span class="side-panel-title">Chat</span>
+      <button class="side-panel-close" id="btn-chat-close" aria-label="Close chat">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+    <div class="chat-messages" id="chat-messages" aria-live="polite">
+      <div class="msg msg-malio">
+        <div class="msg-avatar">M</div>
+        <div class="msg-bubble">
+          <p>Hi, I'm Malio. Ask me anything about music.</p>
+        </div>
+      </div>
+    </div>
+    <div class="chat-loading" id="chat-loading" hidden>
+      <span class="loading-dot"></span>
+      <span class="loading-dot"></span>
+      <span class="loading-dot"></span>
+    </div>
+    <div class="chat-input-container">
+      <input type="text" class="chat-input" id="chat-input"
+             placeholder="Ask about music..." aria-label="Chat message" autocomplete="off">
+      <button class="chat-send-btn" id="btn-send" aria-label="Send">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      </button>
+    </div>
+  </aside>
+
+  <!-- Search Panel -->
+  <aside class="side-panel search-panel" id="search-panel" hidden>
+    <div class="side-panel-header">
+      <span class="side-panel-title">Search</span>
+      <button class="side-panel-close" id="btn-search-close" aria-label="Close search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+    <div class="search-input-container">
+      <input type="text" class="search-input" id="search-input"
+             placeholder="Search songs, artists..." aria-label="Search">
+      <button class="search-submit-btn" id="btn-search">Search</button>
+    </div>
+    <div class="search-results" id="search-results"></div>
+  </aside>
+
+  <!-- Memory Corridor Panel -->
+  <aside class="side-panel library-panel" id="library-panel" hidden>
+    <div class="side-panel-header">
+      <span class="side-panel-title">记忆回廊</span>
+      <button class="side-panel-close" id="btn-library-close" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+    <div class="corridor-content" id="corridor-content">
+      <!-- Scene playlists section -->
+      <div class="corridor-section" id="scene-section">
+        <div class="section-label">场景歌单</div>
+        <div class="scene-list" id="scene-list"></div>
+      </div>
+      <!-- User playlists section -->
+      <div class="corridor-section" id="user-section">
+        <div class="section-label">我的歌单</div>
+        <div class="playlist-list" id="playlist-list"></div>
+      </div>
+      <!-- All songs expandable section -->
+      <div class="corridor-section" id="all-songs-section">
+        <div class="section-label expandable" id="all-songs-toggle">
+          <span class="expand-arrow">▸</span> 全部歌曲 (<span id="all-songs-count">0</span>)
+        </div>
+        <div class="song-list" id="song-list" hidden></div>
+      </div>
+    </div>
+    <div class="corridor-footer">
+      <button class="corridor-btn" id="btn-new-playlist">+ 新建歌单</button>
+    </div>
+  </aside>
+
+  <!-- ===== Hidden Audio Element ===== -->
+  <audio id="audio-player" preload="metadata"></audio>
+
+  <!-- ===== Scripts ===== -->
+  <script src="/src/particles.js"></script>
+  <script src="/src/particles/nebula.js"></script>
+  <script src="/src/ws-client.js"></script>
+  <script src="/src/app.js"></script>
+</body>
+</html>

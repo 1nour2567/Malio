@@ -1,0 +1,35 @@
+[
+  {
+    "user_id": "default",
+    "song_id": "song_001",
+    "timestamp": "2024-01-01T08:00:00",
+    "context": {
+      "timeOfDay": "morning",
+      "weather": "sunny",
+      "mood": "good"
+    },
+    "skip_rate": 0.0
+  },
+  {
+    "user_id": "default",
+    "song_id": "song_002",
+    "timestamp": "2024-01-01T14:00:00",
+    "context": {
+      "timeOfDay": "afternoon",
+      "weather": "cloudy",
+      "mood": "focused"
+    },
+    "skip_rate": 0.0
+  },
+  {
+    "user_id": "default",
+    "song_id": "song_003",
+    "timestamp": "2024-01-01T19:00:00",
+    "context": {
+      "timeOfDay": "evening",
+      "weather": "sunny",
+      "mood": "happy"
+    },
+    "skip_rate": 0.0
+  }
+]

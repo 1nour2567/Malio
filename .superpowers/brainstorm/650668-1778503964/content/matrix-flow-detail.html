@@ -1,0 +1,79 @@
+<div style="text-align:center; padding:20px 0;">
+  <h2>底层代码流 — 瀑布绕流效果</h2>
+  <p style="color:var(--clr-muted);">字符从顶部垂直下落 → 遇到播放器卡片 → 绕流两侧 → 渐变消失</p>
+</div>
+
+<pre style="background:#0D0D0D; color:#22C55E; padding:20px; border-radius:12px; font-family:monospace; font-size:11px; line-height:1.8; overflow:hidden;">
+│  function    │          │  const mood  │          │  var weather │
+│  analyze()   │          │  = detect()  │          │  = fetchApi  │
+│              │    ┌──────────────┐    │              │
+│  const ctx   │    │              │    │  return data │
+│  = build()   │    │   🎵 正在播放  │    │  .then(res)  │
+│              │    │              │    │              │
+│  if (valid)  │    │   晴天        │    │  const next  │
+│      ↓       │    │   周杰伦      │    │  = queue[0]  │
+│  ░░░░░░░░░░  │    │   叶惠美      │    │  ░░░░░░░░░░  │
+│  ░░fading░░  │    │              │    │  ░░fading░░  │
+│              │    └──────────────┘    │              │
+│              │          │              │              │
+│              │    ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░   │
+│              │    ░░░ characters die here ░░░░░░░   │
+│              │    ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░   │
+</pre>
+
+<div style="margin-top:24px;">
+  <h3>动态参数映射</h3>
+  <table style="width:100%; border-collapse:collapse;">
+    <tr style="color:var(--clr-accent);">
+      <th style="padding:10px;text-align:left;">环境参数</th>
+      <th style="padding:10px;text-align:left;">影响的视觉属性</th>
+      <th style="padding:10px;text-align:left;">效果</th>
+    </tr>
+    <tr>
+      <td style="padding:10px;">心情：开心</td>
+      <td style="padding:10px;">流速 ↑ / 颜色暖绿</td>
+      <td style="padding:10px;color:#22C55E;">字符轻快下落，暖绿色</td>
+    </tr>
+    <tr>
+      <td style="padding:10px;">心情：低落</td>
+      <td style="padding:10px;">流速 ↓ / 颜色蓝紫</td>
+      <td style="padding:10px;color:#756BB1;">字符缓慢飘落，冷色调</td>
+    </tr>
+    <tr>
+      <td style="padding:10px;">天气：晴天</td>
+      <td style="padding:10px;">密度低 / 透明度高</td>
+      <td style="padding:10px;">稀疏的字符，透出背景</td>
+    </tr>
+    <tr>
+      <td style="padding:10px;">天气：雨</td>
+      <td style="padding:10px;">密度高 / 速度略快</td>
+      <td style="padding:10px;">密集的字符，模拟雨感</td>
+    </tr>
+    <tr>
+      <td style="padding:10px;">时间：夜间</td>
+      <td style="padding:10px;">亮度降低 / 颜色偏暗</td>
+      <td style="padding:10px;">字符变暗，不刺眼</td>
+    </tr>
+    <tr>
+      <td style="padding:10px;">音乐：激烈</td>
+      <td style="padding:10px;">振幅大 / 字符跳跃</td>
+      <td style="padding:10px;">字符有节奏地波动</td>
+    </tr>
+    <tr>
+      <td style="padding:10px;">音乐：舒缓</td>
+      <td style="padding:10px;">振幅小 / 字符平滑</td>
+      <td style="padding:10px;">字符安静匀速下落</td>
+    </tr>
+  </table>
+</div>
+
+<div style="margin-top:24px;">
+  <h3>技术实现：Canvas + 粒子系统</h3>
+  <ul style="color:var(--clr-muted);">
+    <li>用 HTML5 Canvas 绘制，不阻塞主界面渲染</li>
+    <li>每个字符是一个粒子：{x, y, char, speed, opacity, color}</li>
+    <li>检测播放器卡片位置 → 粒子进入碰撞区 → 计算绕流路径</li>
+    <li>绕流后粒子 opacity 衰减到 0，在卡片下方消失</li>
+    <li>每秒更新一次环境参数（心情/天气），平滑插值过渡</li>
+  </ul>
+</div>
