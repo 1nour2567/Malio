@@ -117,15 +117,4 @@ def create_providers_from_config(settings) -> ProviderRegistry:
             model="deepseek-chat", temperature=0.7
         ))
 
-    # Anthropic Claude (future, needs different API format — extend later)
-    ant_key = getattr(settings, 'anthropic_api_key', '')
-    if ant_key:
-        registry.register(OpenAICompatibleProvider(
-            name="claude", api_key=ant_key,
-            base_url="https://api.anthropic.com/v1",
-            model=getattr(settings, 'anthropic_model', 'claude-sonnet-4-6'),
-            temperature=0.7
-        ))
-
-    # Add more: Groq, Ollama (localhost), Minimax, Qwen, etc.
     return registry

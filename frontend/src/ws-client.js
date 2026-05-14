@@ -17,6 +17,7 @@ class WSClient {
     this.onSnapshot = null;
     this.onLog = null;
     this.onStateUpdate = null;
+    this.onRule = null;  /* agent-generated DSL rules */
 
     this._connect();
   }
@@ -92,6 +93,12 @@ class WSClient {
         }
         break;
 
+      case 'rule':
+        if (typeof this.onRule === 'function') {
+          this.onRule(data);
+        }
+        break;
+
       default:
         /* unknown type — forward to onStateUpdate if set */
         if (typeof this.onStateUpdate === 'function') {
@@ -119,6 +126,13 @@ class WSClient {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     try {
       this.ws.send(JSON.stringify({ action: 'get_state' }));
+    } catch (_) { /* ignore */ }
+  }
+
+  sendCoreEvent (type, detail) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    try {
+      this.ws.send(JSON.stringify({ action: 'core_event', event: { type: type, detail: detail, ts: Date.now() } }));
     } catch (_) { /* ignore */ }
   }
 

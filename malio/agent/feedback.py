@@ -40,6 +40,7 @@ class Feedback:
             "agent_log": "",
             "tool_error": None,
             "atmosphere": None,
+            "core_mode": "dot",      # dot / vortex / helix / error
             "timestamp": datetime.now().isoformat(),
             "seq": self._seq,
         }

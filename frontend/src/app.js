@@ -117,6 +117,8 @@ document.addEventListener('DOMContentLoaded', () => {
   fetchLibraryStats();
   bindEvents();
   setupWsClient();
+  initAudioReactivity();
+  initParticleRules();
   startParticleMood();
   initIdleTimer();
   injectSongLibrary();
@@ -130,6 +132,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (dom.audioPlayer) dom.audioPlayer.play().catch(function () {});
         state.isPlaying = true;
       }
+      if (wsClient) wsClient.sendCoreEvent('time_warp', { active: active });
     };
   }
 });
@@ -141,6 +144,7 @@ if (typeof engine !== 'undefined') {
     if (_swipeBusy) return;
     _swipeBusy = true;
     setTimeout(function () { _swipeBusy = false; }, 800);
+    if (wsClient) wsClient.sendCoreEvent('song_skip', { direction: dir });
     if (dir === 'right') {
       if (typeof nextSong === 'function') nextSong();
     } else {
@@ -150,6 +154,7 @@ if (typeof engine !== 'undefined') {
 
   engine.onCaptureComplete = function (capturedSongs) {
     if (!capturedSongs || !capturedSongs.length) return;
+    if (wsClient) wsClient.sendCoreEvent('nebula_capture', { count: capturedSongs.length });
     // Show confirmation dialog
     var names = capturedSongs.map(function(s) { return s.title || '?' ; }).join('、');
     if (confirm('将「' + names + '」的能量种子交给 Malio，生成新歌单？')) {
@@ -443,6 +448,9 @@ function formatTime (sec) {
 }
 
 function setCurrentSong (song) {
+  /* trigger DSL rules */
+  if (particleRules) particleRules.triggerEvent('song_change');
+
   state.currentSong = {
     id:         song.id || '',
     title:      song.title || '—',
@@ -1268,18 +1276,23 @@ function setupWsClient () {
     showAgentLog(message);
   };
 
+  wsClient.onRule = function (ruleJson) {
+    if (particleRules) particleRules.addRule(ruleJson);
+  };
+
   wsClient.onSnapshot = function (data) {
-    if (data.player) {
-      if (data.player.current_song) {
-        setCurrentSong(data.player.current_song);
-      }
-      if (data.player.is_playing !== undefined) {
-        state.isPlaying = data.player.is_playing;
-        updatePlayIcon();
-      }
-      if (data.player.playlist) {
-        state.playlist = data.player.playlist;
-      }
+    if (data.song) {
+      setCurrentSong(data.song);
+    }
+    if (data.is_playing !== undefined) {
+      state.isPlaying = data.is_playing;
+      updatePlayIcon();
+    }
+    if (data.playlist && data.playlist.length) {
+      state.playlist = data.playlist;
+    }
+    if (data.core_mode && typeof engine !== 'undefined') {
+      engine.setCoreMode(data.core_mode);
     }
   };
 
@@ -1294,6 +1307,78 @@ function setupWsClient () {
       state.playlist = data.playlist || [];
     }
   };
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PARTICLE RULES — DSL engine
+   ═══════════════════════════════════════════════════════════════ */
+
+var _rulesLoopId = null;
+
+function initParticleRules () {
+  if (typeof ParticleRules === 'undefined' || typeof engine === 'undefined') return;
+  particleRules = new ParticleRules(engine);
+
+  /* hook into animation loop */
+  function rulesLoop () {
+    particleRules.evaluate(performance.now());
+    _rulesLoopId = requestAnimationFrame(rulesLoop);
+  }
+  _rulesLoopId = requestAnimationFrame(rulesLoop);
+}
+
+/* expose for ws-client to feed agent-generated rules */
+window.addAgentRule = function (ruleJson) {
+  if (particleRules) particleRules.addRule(ruleJson);
+};
+window.removeAgentRule = function (id) {
+  if (particleRules) particleRules.removeRule(id);
+};
+
+/* ═══════════════════════════════════════════════════════════════
+   AUDIO REACTIVITY — drive particles with music
+   ═══════════════════════════════════════════════════════════════ */
+
+var _audioAnalyzerInitialized = false;
+var _audioUpdateRaf = null;
+
+function initAudioReactivity () {
+  if (typeof AudioAnalyzer === 'undefined') return;
+  /* AudioContext requires user gesture — activate on first play */
+  if (dom.audioPlayer) {
+    dom.audioPlayer.addEventListener('play', function () {
+      if (!_audioAnalyzerInitialized) {
+        audioAnalyzer = new AudioAnalyzer(dom.audioPlayer);
+        audioAnalyzer.init();
+        if (audioAnalyzer.active) {
+          _audioAnalyzerInitialized = true;
+          _startAudioLoop();
+        }
+      }
+    }, { once: false });
+  }
+  /* If already playing when page loads */
+  if (dom.audioPlayer && !dom.audioPlayer.paused && !_audioAnalyzerInitialized) {
+    audioAnalyzer = new AudioAnalyzer(dom.audioPlayer);
+    audioAnalyzer.init();
+    if (audioAnalyzer.active) {
+      _audioAnalyzerInitialized = true;
+      _startAudioLoop();
+    }
+  }
+}
+
+function _startAudioLoop () {
+  function loop () {
+    if (!audioAnalyzer || !audioAnalyzer.active) {
+      _audioUpdateRaf = null;
+      return;
+    }
+    var data = audioAnalyzer.analyze();
+    if (typeof engine !== 'undefined') engine.setAudioData(data);
+    _audioUpdateRaf = requestAnimationFrame(loop);
+  }
+  _audioUpdateRaf = requestAnimationFrame(loop);
 }
 
 /* Fallback WebSocket if ws-client.js is not loaded */
@@ -1329,9 +1414,9 @@ function handleWsMessage (data) {
   } else if (data.type === 'playlist_update') {
     state.playlist = data.playlist || [];
   } else if (data.type === 'state_snapshot') {
-    if (data.player && data.player.current_song) {
-      setCurrentSong(data.player.current_song);
-    }
+    if (data.song) { setCurrentSong(data.song); }
+    if (data.is_playing !== undefined) { state.isPlaying = data.is_playing; updatePlayIcon(); }
+    if (data.playlist && data.playlist.length) { state.playlist = data.playlist; }
   } else if (data.type === 'agent_log') {
     showAgentLog(data.message || data.content || '');
   }
