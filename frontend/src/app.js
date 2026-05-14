@@ -1465,8 +1465,8 @@ function _idleTick () {
   }
 
   if (newLevel !== _idleLevel) {
+    var transition = newLevel > _idleLevel ? 30 : 8; // 30s down, 8s up
     _idleLevel = newLevel;
-    var transition = newLevel > (_idleLevel - 1) ? 30 : 8; // 30s down, 8s up
     if (typeof engine !== 'undefined' && engine.setTimeLevel) {
       engine.setTimeLevel(newLevel, transition);
     }
