@@ -1031,7 +1031,10 @@ function renderUserPlaylists (playlists) {
         if (!list._loaded) {
           list._loaded = true;
           fetch('/api/playlists/' + plId).then(function (r) { return r.json(); }).then(function (d) {
-            list.innerHTML = buildSongExpandList(d.songs || []).innerHTML;
+            // Use appendChild to preserve event listeners (innerHTML strips them)
+            var songEl = buildSongExpandList(d.songs || []);
+            while (list.firstChild) list.removeChild(list.firstChild);
+            while (songEl.firstChild) list.appendChild(songEl.firstChild);
           });
         }
       };
