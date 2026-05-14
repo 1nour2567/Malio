@@ -15,6 +15,7 @@ from integrations.netease_integration import NeteaseIntegration
 from integrations.elevenlabs_integration import ElevenLabsIntegration
 from data.data_importer import MusicDataImporter
 from config.config import settings
+from memory.short_term import l2_memory
 from agent.perception import Perception
 from agent.router import Router
 from agent.reasoner import Reasoner
@@ -200,9 +201,10 @@ async def chat_with_malio(request: UserInput):
         perception_ctx = perception.build(request.input, request.user_id)
         if request.context:
             perception_ctx["context"] = request.context
-        # inject recent core interactions so Agent knows "user touched my body"
+        # inject recent core interactions + L2 memory so Agent knows "user touched my body"
         if core_events:
-            perception_ctx["core_events"] = list(core_events)[-10:]  # last 10 events
+            perception_ctx["core_events"] = list(core_events)[-10:]
+        perception_ctx["l2_summary"] = l2_memory.summary_for_prompt()
 
         # Stage 2: Router — direct command or reasoning path
         print("[chat] Stage 2: Router...")
@@ -1462,7 +1464,7 @@ async def websocket_stream(websocket: WebSocket):
                     evt = data.get("event", {})
                     evt["received_at"] = datetime.now().isoformat()
                     core_events.append(evt)
-                    # push agent log to all clients: "用户 [动作]"
+                    l2_memory.record(f"core_{evt.get('type','')}", evt.get("detail", {}))
                     label = {"song_skip":"切歌","time_warp":"暂停粒子","search":"搜索","spin":"调音量","core_drag":"拖拽内核","nebula_capture":"捕获歌曲"}.get(evt.get("type",""), evt.get("type",""))
                     await feedback_mgr.push_agent_log(f"感知到用户交互: {label}")
             except asyncio.TimeoutError:

@@ -77,7 +77,7 @@ class Reasoner:
                          f"hour: {time_info.get('hour', '?')}, "
                          f"day: {time_info.get('day_of_week', '')}")
 
-        # Recent core interactions (user touched Agent's body)
+        # Recent core interactions + L2 memory
         core_events = context.get("core_events", [])
         if core_events:
             lines.append("")
@@ -85,6 +85,11 @@ class Reasoner:
             for evt in core_events[-8:]:
                 label = {"song_skip":"切歌","time_warp":"子弹时间","search":"搜索","spin":"调音量","core_drag":"拖拽内核","nebula_capture":"捕获歌曲"}.get(evt.get("type",""), evt.get("type",""))
                 lines.append(f"- [{evt.get('received_at', '?')}] {label}")
+
+        l2_summary = context.get("l2_summary", "")
+        if l2_summary:
+            lines.append("")
+            lines.append(l2_summary)
 
         lines.extend([
             "",

@@ -177,7 +177,9 @@ class MatrixRain {
       const pos = this._eventPos(e);
       const dx = pos.x - this.core.x;
       const dy = pos.y - this.core.y;
-      if (Math.sqrt(dx * dx + dy * dy) < this.core.r + 10) {
+      const nearCore = Math.sqrt(dx * dx + dy * dy) < this.core.r + 10;
+
+      if (nearCore) {
         // Double-tap detection
         const now = performance.now();
         if (now - this._lastTap < 400) {
@@ -192,7 +194,6 @@ class MatrixRain {
             this._timeWarpBubble = 0;
             this._lastWarpInteract = now;
           } else {
-            // Reset all particle velocities on exit
             for (const layer of [this._colsFar, this._colsMid, this._colsNear]) {
               for (const col of layer) {
                 for (const c of col.stream) {
@@ -224,15 +225,35 @@ class MatrixRain {
         this.canvas.style.cursor = 'grabbing';
         e.preventDefault();
       } else {
-        // Potential swipe — start tracking, prevent scroll
+        /* outside core → swipe only, no drag */
         _swiping = true;
         _swipeStartX = pos.x;
         _swipeStartY = pos.y;
+        _swipeAccDx = 0;
+        _swipeAccDy = 0;
         e.preventDefault();
       }
     };
     let _dragPrevX = 0, _dragPrevY = 0;
+    let _swipeAccDx = 0, _swipeAccDy = 0;
     const move = (e) => {
+      const pos = this._eventPos(e);
+
+      /* track swipe delta — fire immediately on threshold */
+      if (_swiping) {
+        _swipeAccDx = pos.x - _swipeStartX;
+        _swipeAccDy = pos.y - _swipeStartY;
+        /* immediate fire once threshold crossed */
+        if (Math.abs(_swipeAccDx) > 30 && Math.abs(_swipeAccDx) > Math.abs(_swipeAccDy)) {
+          const dir = _swipeAccDx > 0 ? 'right' : 'left';
+          this.triggerSwipeRipple(dir);
+          _swiping = false;
+          _swipeAccDx = 0;
+          _swipeAccDy = 0;
+          return;
+        }
+      }
+
       if (this._dragging) {
         const pos = this._eventPos(e);
         // Stir particles near core during drag
@@ -300,23 +321,13 @@ class MatrixRain {
     const end = (e) => {
       clearTimeout(_pressTimer);
       if (this._summonActive) this.endSummon();
+
       if (this._dragging) {
         this._returning = true;
         this._retVX = 0;
         this._retVY = 0;
       }
       this._dragging = false;
-      // Swipe detection: check horizontal movement
-      if (_swiping) {
-        const pos = this._eventPos(e);
-        const swipeDx = pos.x - _swipeStartX;
-        const swipeDy = pos.y - _swipeStartY;
-        if (Math.abs(swipeDx) > 30 && Math.abs(swipeDx) > Math.abs(swipeDy) * 0.5) {
-          if (typeof this.onSwipe === 'function') {
-            this.onSwipe(swipeDx > 0 ? 'right' : 'left');
-          }
-        }
-      }
       _swiping = false;
       this.canvas.style.cursor = '';
     };
@@ -490,6 +501,31 @@ class MatrixRain {
       ]
     };
     this._coreExpand = now; // trigger core expansion
+  }
+
+  triggerSwipeRipple (dir) {
+    const now = performance.now();
+    const color = this._targetParams.color || '#22C55E';
+    /* directional bias: push ripple slightly to match swipe direction */
+    const dirX = dir === 'right' ? 1 : -1;
+    this._burst = {
+      start: now,
+      color: color,
+      dirX: dirX,
+      waves: [
+        { delay: 0,   speed: 220, duration: 180, maxR: 240, ampNear: 20, ampFar: 4, cycle: 130, brightUp: 1.3, dirPush: dirX * 0.6 },
+        { delay: 100, speed: 180, duration: 220, maxR: 200, ampNear: 14, ampFar: 3,  cycle: 150, tintColor: color, tintStrength: 0.25, dirPush: dirX * 0.3 },
+        { delay: 200, speed: 150, duration: 280, maxR: 170, ampNear: 9,  ampFar: 2,  cycle: 160, alphaDrop: 0.88, dirPush: dirX * 0.15 },
+      ]
+    };
+    this._coreExpand = now;
+    /* fire callback after ripple starts */
+    const self = this;
+    setTimeout(() => {
+      if (typeof self.onSwipe === 'function') {
+        self.onSwipe(dir);
+      }
+    }, 220);
   }
 
   startSummon () {
@@ -697,6 +733,11 @@ class MatrixRain {
                   if (w.alphaDrop) c._walpha = (c._walpha || 1) * w.alphaDrop;
                   if (w.tintColor) c._wtint = w.tintColor;
                   if (w.stretch) c._wstretch = 1 + (c._wstretch || 0) * 0.3 + w.stretch * Math.cos(phase);
+                  /* directional push for swipe ripple */
+                  if (w.dirPush) {
+                    const pushForce = w.dirPush * Math.cos(phase) * ampFactor;
+                    c.vx = (c.vx || 0) + pushForce * 0.8;
+                  }
                 }
               }
             }
