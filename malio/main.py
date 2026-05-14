@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, Query, Response, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Depends, Query, Response, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
@@ -30,6 +30,19 @@ app = FastAPI(
     description="AI music agent that provides personalized music recommendations",
     version="0.2.0"
 )
+
+# ── Global error handler ─────────────────────────────────
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    import traceback
+    print(f"[error] {type(exc).__name__}: {exc}")
+    print(traceback.format_exc())
+    return Response(
+        content=json.dumps({"error": str(exc), "type": type(exc).__name__},
+                          ensure_ascii=False),
+        status_code=500,
+        media_type="application/json"
+    )
 
 # CORS middleware
 cors_origins = [origin.strip() for origin in settings.cors_origins.split(",")]
@@ -70,6 +83,7 @@ router = Router()
 reasoner = Reasoner(provider_registry)
 tool_registry = ToolRegistry()
 feedback_mgr = Feedback()
+feedback_mgr._perception = perception  # wire for push_atmosphere_by_rules()
 
 # Register tools
 tool_registry.register("search_music", "搜索歌曲", {"query": "string", "limit": "int"},
@@ -186,6 +200,9 @@ async def chat_with_malio(request: UserInput):
         perception_ctx = perception.build(request.input, request.user_id)
         if request.context:
             perception_ctx["context"] = request.context
+        # inject recent core interactions so Agent knows "user touched my body"
+        if core_events:
+            perception_ctx["core_events"] = list(core_events)[-10:]  # last 10 events
 
         # Stage 2: Router — direct command or reasoning path
         print("[chat] Stage 2: Router...")
@@ -227,6 +244,7 @@ async def chat_with_malio(request: UserInput):
 
         # Stage 3: Reasoner — LLM reasoning
         print("[chat] Stage 3: Reasoner...")
+        await feedback_mgr.push_snapshot(core_mode="vortex", agent_log="思考中...")
         reasoner_result = reasoner.reason(request.input, perception_ctx)
         agent_log = reasoner_result.get("reasoning", "")
         response_text = reasoner_result.get("response", "好的，让我为您推荐一些音乐。")
@@ -255,6 +273,7 @@ async def chat_with_malio(request: UserInput):
         # Stage 5: Feedback — push state snapshot
         print("[chat] Stage 5: Feedback...")
         await feedback_mgr.push_snapshot(
+            core_mode="dot",
             agent_log=agent_log,
             song=recommendations[0] if recommendations else None,
             playlist=recommendations,
@@ -267,53 +286,11 @@ async def chat_with_malio(request: UserInput):
         import traceback
         print(f"[chat] ERROR: {e}")
         print(f"[chat] Full traceback:\n{traceback.format_exc()}")
+        await feedback_mgr.push_snapshot(core_mode="error", agent_log=f"错误: {e}")
         return MusicResponse(
             response=f"抱歉，我遇到了一些问题。请检查服务器日志以了解详细信息。\n错误类型：{type(e).__name__}",
             recommendations=[]
         )
-
-
-def _generate_smart_chat_response(user_message: str, context: Dict, recommendations: List) -> str:
-    """Generate smart chat responses without API key"""
-    time_of_day = context.get('time', {}).get('time_of_day', 'day')
-
-    # Common user intents
-    greetings = ['你好', '您好', '嗨', 'hi', 'hello', '早上好', '下午好', '晚上好']
-    music_requests = ['音乐', '歌', '听', '推荐', '播放', '唱']
-    mood_requests = ['开心', '难过', '快乐', '悲伤', '忧郁', '兴奋', '安静']
-    thanks = ['谢谢', '感谢', '谢了']
-    goodbye = ['再见', '拜拜', '走了', '离开']
-
-    user_lower = user_message.lower()
-
-    # Check for common intents
-    if any(greet in user_lower for greet in greetings):
-        time_greeting = {
-            'morning': '早上好',
-            'afternoon': '下午好',
-            'evening': '晚上好',
-            'night': '晚上好'
-        }.get(time_of_day, '你好')
-        return f"{time_greeting}！我是 Malio，您的音乐智能助手！我为您准备了一些推荐歌曲，您可以点击上一首/下一首按钮来切换。您想听什么类型的音乐呢？"
-
-    elif any(request in user_lower for request in music_requests):
-        return f"好的！我为您准备了{len(recommendations)}首推荐歌曲！您可以点击推荐列表中的任意歌曲开始播放，或者用控制按钮切换。有什么特别想听的风格或歌手吗？"
-
-    elif any(mood in user_lower for mood in mood_requests):
-        if any(word in user_lower for word in ['难过', '悲伤', '忧郁', '不开心']):
-            return "我理解您的心情。听一些温暖治愈的音乐会有帮助！我为您准备了一些舒缓的音乐，希望能让您感觉好一点。"
-        elif any(word in user_lower for word in ['开心', '快乐', '兴奋']):
-            return "太棒了！在这么好的心情下，听一些欢快的音乐会更棒！我为您准备了一些有活力的歌曲！"
-        return "我明白您的心情！让我们用合适的音乐来配合您的心情吧。"
-
-    elif any(thank in user_lower for thank in thanks):
-        return "不客气！能为您服务是我的荣幸！如果有其他想听的音乐，随时告诉我！"
-
-    elif any(bye in user_lower for bye in goodbye):
-        return "再见！希望您享受今天的音乐。下次想听音乐时，随时找我！"
-
-    else:
-        return f"我收到您的消息了！我已经为您准备了{len(recommendations)}首推荐歌曲，您可以点击上一首/下一首按钮来切换，或者点击推荐列表中的任意歌曲开始播放！有什么特别想听的音乐吗？"
 
 
 @app.post("/api/generate-playlist-name")
@@ -1462,6 +1439,10 @@ async def remove_song_from_playlist(playlist_id: str, song_id: str):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
+# ── Core event memory (Agent-perceived interactions) ─────
+import collections
+core_events = collections.deque(maxlen=50)  # recent 50 core interactions
+
 # ── WebSocket: Real-time playback state ─────────────────────────
 @app.websocket("/stream")
 async def websocket_stream(websocket: WebSocket):
@@ -1472,12 +1453,18 @@ async def websocket_stream(websocket: WebSocket):
         while True:
             try:
                 data = await asyncio.wait_for(websocket.receive_json(), timeout=30)
-                if data.get("action") == "get_state":
+                action = data.get("action", "")
+                if action == "get_state":
                     await feedback_mgr.push_snapshot(
-                        song=None,
-                        is_playing=False,
-                        playlist=[],
+                        song=None, is_playing=False, playlist=[],
                     )
+                elif action == "core_event":
+                    evt = data.get("event", {})
+                    evt["received_at"] = datetime.now().isoformat()
+                    core_events.append(evt)
+                    # push agent log to all clients: "用户 [动作]"
+                    label = {"song_skip":"切歌","time_warp":"暂停粒子","search":"搜索","spin":"调音量","core_drag":"拖拽内核","nebula_capture":"捕获歌曲"}.get(evt.get("type",""), evt.get("type",""))
+                    await feedback_mgr.push_agent_log(f"感知到用户交互: {label}")
             except asyncio.TimeoutError:
                 await websocket.send_json({"type": "heartbeat"})
     except WebSocketDisconnect:

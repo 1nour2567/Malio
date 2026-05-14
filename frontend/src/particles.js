@@ -151,6 +151,14 @@ class MatrixRain {
     this.onSwipe = null;            // callback for swipe gesture
     this.onTimeWarp = null;         // callback for double-tap pause
     this.onCaptureComplete = null;  // callback for nebula capture → playlist
+    /* audio reactivity */
+    this._audio = { bass: 0, mid: 0, treble: 0, beat: 0 };
+    /* core mode from Agent */
+    this._coreMode = 'dot';  /* dot / vortex / helix / error */
+    /* particle memory — interaction fingerprint */
+    this._memory = this._loadMemory();
+    this._memoryDirty = false;
+    this._memorySaveTimer = null;
     this._bindDrag();
     this._boundAnimate = this._animate.bind(this);
     this._boundAnimate();
@@ -365,6 +373,51 @@ class MatrixRain {
     if (lerpSpeed !== undefined) this._lerpFactor = lerpSpeed;
   }
 
+  setAudioData (data) {
+    this._audio.bass  += (data.bass  - this._audio.bass)  * 0.3;
+    this._audio.mid   += (data.mid   - this._audio.mid)   * 0.3;
+    this._audio.treble += (data.treble - this._audio.treble) * 0.3;
+    this._audio.beat = data.beat;
+  }
+
+  setCoreMode (mode) {
+    if (this._coreMode !== mode) {
+      this._coreMode = mode;
+      if (mode === 'error') this._coreModeStart = performance.now();
+      if (mode === 'vortex') this._coreModeStart = performance.now();
+    }
+  }
+
+  /* ── Particle memory: per-particle interaction fingerprint ── */
+  recordInteraction (p, type) {
+    if (!p) return;
+    p.mem = (p.mem || 0) + 1;
+    p.memType = type;
+    this._memory.totalInteractions += 1;
+    this._memoryDirty = true;
+    /* batch save every 5s */
+    if (!this._memorySaveTimer) {
+      const self = this;
+      this._memorySaveTimer = setTimeout(() => {
+        self._saveMemory();
+        self._memorySaveTimer = null;
+      }, 5000);
+    }
+  }
+
+  _loadMemory () {
+    try {
+      const raw = localStorage.getItem('malio_particle_memory');
+      return raw ? JSON.parse(raw) : { totalInteractions: 0, sessions: 0 };
+    } catch (e) { return { totalInteractions: 0, sessions: 0 }; }
+  }
+
+  _saveMemory () {
+    this._memory.sessions += 1;
+    try { localStorage.setItem('malio_particle_memory', JSON.stringify(this._memory)); }
+    catch (e) { /* storage full or unavailable */ }
+  }
+
   setSongLibrary (songs) {
     this._infoChars = [];  // each entry = char[] (full title as phrase)
     this._infoTags = [];
@@ -535,6 +588,8 @@ class MatrixRain {
           vx: 0, vy: 0,
           tick: Math.floor(Math.random() * 30),
           phaseOff: (Math.random() - 0.5) * 0.3,
+          mem: 0,     /* interaction count — user fingerprint */
+          memType: 0, /* 0=none, 1=drag, 2=burst, 3=core, 4=capture */
         });
       }
       cols.push({ x, stream, speedBase, speedPhase, speedPeriod, layer });
@@ -599,12 +654,18 @@ class MatrixRain {
     const fadeSpeed = L[0];
     const fadeBright = [L[1], L[2], L[3]]; // near, mid, far
 
+    /* ── audio reactivity ──────────────────────────────── */
+    const a = this._audio;
+    const audioPulse = 1 + a.bass * 0.3 + a.mid * 0.15 + a.treble * 0.08 + a.beat * 0.25;
+
     const h = this.canvas.height;
     const w = this.canvas.width;
-    const spd = this.params.speed;
+    const spd = this.params.speed * audioPulse;
     const ctx = this.ctx;
 
-    ctx.fillStyle = 'rgba(0,0,0,' + this._fadeAlpha + ')';
+    /* trail fade modulated by audio energy */
+    const dynamicFade = this._fadeAlpha * (1 - a.bass * 0.15);
+    ctx.fillStyle = 'rgba(0,0,0,' + dynamicFade + ')';
     ctx.fillRect(0, 0, w, h);
 
     // Water ripple burst — sine wave oscillation from core
@@ -852,14 +913,19 @@ class MatrixRain {
           }
         }
 
+        // Particle memory: veteran particles slightly larger
+        const memScale = 1 + Math.min(0.3, (c.mem || 0) * 0.01);
+        lensScale *= memScale;
+
         // Capture target scaling: particle grows as core approaches
         if (c._captureScale && c._captureScale > 1) {
           lensScale = Math.max(lensScale, c._captureScale);
         }
 
         // Luminance gradient
+        const memoryBoost = 1 + Math.min(0.5, (c.mem || 0) * 0.05); /* veteran particles glow */
         const infoBoost = c._tag ? 1.15 : 1.0;
-        let yBright = (0.65 + 0.35 * Math.min(1, c.y / h)) * infoBoost * warpBoost;
+        let yBright = (0.65 + 0.35 * Math.min(1, c.y / h)) * infoBoost * warpBoost * memoryBoost;
         if (c._wbright) yBright *= Math.min(2, c._wbright);
         const depthBright = layer.brightness * layerFade;
         const bright = yBright * depthBright;
@@ -929,6 +995,30 @@ class MatrixRain {
     // Core lens — nearly invisible, perceived only through refraction
     if (this.core.active) {
       const cx = this.core.x, cy = this.core.y, cr = this.core.r;
+      const mode = this._coreMode;
+
+      /* ── vortex mode: spinning ring particles ────────── */
+      if (mode === 'vortex' && !this._timeWarp) {
+        ctx.strokeStyle = this._targetParams.color || '#22C55E';
+        ctx.lineWidth = 1.5;
+        ctx.globalAlpha = 0.6;
+        const vortexPhase = (performance.now() / 300) % (Math.PI * 2);
+        for (let i = 0; i < 3; i++) {
+          ctx.beginPath();
+          ctx.arc(cx, cy, cr + 5 + i * 6, vortexPhase + i * 2, vortexPhase + i * 2 + Math.PI * 1.5);
+          ctx.stroke();
+        }
+      }
+
+      /* ── error mode: red flicker + fade ──────────────── */
+      if (mode === 'error') {
+        const sinceError = performance.now() - (this._coreModeStart || 0);
+        const flicker = Math.abs(Math.sin(sinceError / 80)) * (sinceError < 1200 ? 1 : Math.max(0, 1 - (sinceError - 1200) / 2000));
+        ctx.fillStyle = `rgba(255, 0, 0, ${flicker * 0.4})`;
+        ctx.beginPath();
+        ctx.arc(cx, cy, cr + 12, 0, Math.PI * 2);
+        ctx.fill();
+      }
 
       // Ring: dashed during summon, breathing otherwise
       this._breathPhase += this._summonActive ? 0.08 : 0.016;
