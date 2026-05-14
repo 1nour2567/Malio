@@ -156,6 +156,8 @@ class RecommendationEngine:
                     "album": song.album,
                     "genre": song.genre,
                     "duration": song.duration,
+                    "audio_path": song.audio_path,
+                    "preview_url": (song.features or {}).get("preview_url", ""),
                     "score": score
                 })
 
