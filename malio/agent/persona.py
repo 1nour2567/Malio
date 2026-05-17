@@ -34,7 +34,7 @@ class PersonaEngine:
 
         # ── Drift parameters ────────────────────────────────
         self._drift_rate = 0.008       # max drift per event
-        self._natural_decay = 0.003    # per hour toward baseline
+        self._natural_decay = 0.02     # per hour toward baseline (faster recovery)
         self._baseline = {"energy": 0.65, "warmth": 0.58, "playfulness": 0.65}
         self._last_updated = None
 
@@ -106,12 +106,19 @@ class PersonaEngine:
             # ── Playfulness: controls mode-switching ──
             if action_type == "set_mode":
                 if self.playfulness < 0.3:
-                    # Low playfulness: stay in dot mode
                     ca["params"]["mode"] = "dot"
                 elif self.playfulness > 0.7:
-                    # High playfulness: prefer vortex over dot
                     if ca["params"].get("mode") == "dot" and random.random() < 0.4:
                         ca["params"]["mode"] = "vortex"
+
+            # ── Shape constraints ──
+            if action_type == "set_shape":
+                shape = ca["params"].get("shape", "circle")
+                if self.energy < 0.2:
+                    ca["params"]["shape"] = "circle"
+                elif self.energy > 0.8 and shape in ("circle", "hexagon", "diamond"):
+                    if random.random() < 0.3:
+                        ca["params"]["shape"] = random.choice(["star", "pulse_ring", "swirl"])
 
             constrained.append(ca)
 
@@ -217,15 +224,21 @@ class PersonaEngine:
                 {"action": "set_color", "params": {"color": self._random_warm_color()}},
             ])
         if self.playfulness > 0.5:
+            shape_choices = ["circle", "hexagon", "diamond"]
+            if self.warmth > 0.6:
+                shape_choices.extend(["heart", "bloom", "drop"])
+            if self.energy > 0.7:
+                shape_choices.extend(["star", "pulse_ring", "swirl"])
             actions_pool.extend([
                 {"action": "move_core", "params": {
                     "x": round(random.uniform(-25, 25), 0),
                     "y": round(random.uniform(-25, 25), 0)}},
                 {"action": "set_mode", "params": {"mode": random.choice(["dot", "vortex"])}},
+                {"action": "set_shape", "params": {"shape": random.choice(shape_choices)}},
             ])
         if self.energy > 0.6:
             actions_pool.append(
-                {"action": "set_size", "params": {"radius": random.randint(12, 22)}}
+                {"action": "set_size", "params": {"radius": random.randint(16, 28)}}
             )
         if self.energy > 0.75:
             actions_pool.append(
@@ -310,6 +323,15 @@ class PersonaEngine:
     # Drift — GLA-style Reflect-Evolve
     # ═══════════════════════════════════════════════════════════
 
+    def drift_from_recommendation(self):
+        """User asked for a song — gentle pull toward baseline (engagement = healthy)."""
+        self._apply_drift(
+            (self._baseline["energy"] - self.energy) * 0.04,
+            (self._baseline["warmth"] - self.warmth) * 0.04,
+            (self._baseline["playfulness"] - self.playfulness) * 0.04,
+            "用户点歌"
+        )
+
     def drift_from_interaction(self, event_type: str, detail: Dict = None):
         """User interaction perturbs persona — small, cumulative, traceable."""
         reason = ""
@@ -338,6 +360,11 @@ class PersonaEngine:
 
         if reason:
             self._apply_drift(delta_e, delta_w, delta_p, reason)
+            # Debounced save: persist at most once per 60s to avoid IO storms
+            now = __import__('time').time()
+            if now - getattr(self, '_last_save_ts', 0) > 60:
+                self.save()
+                self._last_save_ts = now
 
     def drift_natural(self, hour: int):
         """Natural circadian drift — hourly, small."""

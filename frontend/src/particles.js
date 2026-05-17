@@ -112,7 +112,7 @@ class MatrixRain {
     this._colsFar = [];
     this._colsMid = [];
     this._colsNear = [];
-    this.core = { x: 0, y: 0, r: 36, active: true };
+    this.core = { x: 0, y: 0, r: 27, active: true };
     this._breathPhase = 0;
     this._breathRate = 0.016;   // Agent-controllable
     this._breathDepth = 0.7;    // Agent-controllable
@@ -131,6 +131,10 @@ class MatrixRain {
     this._dX = 0; this._dY = 0;  // drag direction
     this._grabTime = 0;          // when grab started
     this._settled = true;        // core at home, not returning
+    this._ripples = [];          // water ripple rings [{x,y,r,alpha}]
+    this._prevCoreX = this.core.x;
+    this._prevCoreY = this.core.y;
+    this._rippleTimer = 0;       // cooldown between ripple spawns
     this._burst = null;          // light burst state
     this._timeWarp = false;      // bullet time active
     this._timeWarpStart = 0;     // when it started
@@ -160,6 +164,10 @@ class MatrixRain {
     this._searchInputLen = 0;
     /* core mode from Agent */
     this._coreMode = 'dot';  /* dot / vortex / helix / error */
+    this._coreShape = 'circle';       /* current rendered shape */
+    this._shapeTarget = 'circle';     /* morph target */
+    this._shapeMorphT = 1;            /* morph progress 0→1 */
+    this._shapeFromVerts = null;      /* snapshot of vertices at morph start */
     /* particle memory — interaction fingerprint */
     this._memory = this._loadMemory();
     this._memoryDirty = false;
@@ -428,15 +436,105 @@ class MatrixRain {
       this._coreMode = mode;
       this._coreModeStart = performance.now();
     }
-    // Keep vortex visible at least 2s even if dot is pushed
     if (mode === 'vortex') {
       this._coreModeStart = performance.now();
     }
     if (mode === 'dot' && this._coreModeStart && performance.now() - this._coreModeStart < 2000) {
-      // Don't exit vortex yet — let it play out
       this._coreMode = 'vortex';
       this._pendingDot = true;
     }
+  }
+
+  /* ── Shape morphing: LLM-controllable core shape ── */
+  _shapeRadius (shape, theta) {
+    switch (shape) {
+      case 'circle':     return 1;
+      case 'star':       return 0.55 + 0.45 * Math.abs(Math.cos(theta * 2.5));
+      case 'diamond':    return 1 / (Math.abs(Math.cos(theta)) + Math.abs(Math.sin(theta)));
+      case 'hexagon': {
+        const seg = Math.PI / 3;
+        const a = ((theta % seg) + seg) % seg - seg / 2;  // angle within segment [-π/6, π/6]
+        return Math.cos(seg / 2) / Math.cos(a);
+      }
+      case 'heart': {
+        // Heart in polar: r = 1 + 0.45*(sin(θ) - 0.3*sin(3θ))
+        return 1 + 0.45 * (Math.sin(theta) - 0.3 * Math.sin(3 * theta));
+      }
+      case 'pulse_ring': {
+        const pulse = 0.7 + 0.3 * Math.sin(theta * 3 + performance.now() / 500);
+        return pulse;
+      }
+      case 'bloom': {
+        // 6-petal flower: r oscillates 6 times per revolution
+        return 0.45 + 0.55 * Math.abs(Math.cos(theta * 3));
+      }
+      case 'swirl': {
+        // 3-arm spiral: arms twist outward as angle increases
+        return 0.55 + 0.45 * Math.cos(3 * theta + theta * 0.6);
+      }
+      case 'drop': {
+        // Teardrop: pointy at top (θ=π/2 → min r), round at bottom
+        return 0.5 + 0.5 * Math.sin(theta / 2 + Math.PI / 4);
+      }
+      default: return 1;
+    }
+  }
+
+  _buildShapeVerts (shape, radius, cx, cy) {
+    const n = 80;  // vertex count
+    const pts = [];
+    for (let i = 0; i < n; i++) {
+      const theta = (i / n) * Math.PI * 2;
+      const r = radius * this._shapeRadius(shape, theta);
+      pts.push({ x: cx + Math.cos(theta) * r, y: cy + Math.sin(theta) * r });
+    }
+    return pts;
+  }
+
+  _shapeRingParams (shape, breath, beatFlash, grabFlash) {
+    // Per-shape ring rendering: lineWidth, outerGlow, innerGlow, innerAlpha, extra
+    const bf = beatFlash || 1;
+    const gf = grabFlash || 1;
+    switch (shape) {
+      case 'star':
+        return { lineWidth: 2.5, glowAlpha: 0.48 * bf * gf, innerAlpha: 0.012, tips: true };
+      case 'heart':
+        return { lineWidth: 5, glowAlpha: 0.38 * bf * gf, innerAlpha: 0.04, bottomGlow: true };
+      case 'diamond':
+        return { lineWidth: 2, glowAlpha: 0.55 * bf * gf, innerAlpha: 0.008, sharpCorners: true };
+      case 'hexagon':
+        return { lineWidth: 3.5, glowAlpha: 0.42 * bf * gf, innerAlpha: 0.02, cornerDots: true };
+      case 'pulse_ring': {
+        const pw = 2 + 3 * Math.abs(Math.sin(performance.now() / 200));
+        return { lineWidth: pw, glowAlpha: (0.38 + 0.2 * Math.abs(Math.sin(performance.now() / 200))) * bf * gf, innerAlpha: 0.02 };
+      }
+      case 'bloom':
+        return { lineWidth: 4, glowAlpha: 0.35 * bf * gf, innerAlpha: 0.035, doubleLayer: true };
+      case 'swirl':
+        return { lineWidth: 3, glowAlpha: 0.5 * bf * gf, innerAlpha: 0.02, tailArcs: true };
+      case 'drop':
+        return { lineWidth: 4.5, glowAlpha: 0.38 * bf * gf, innerAlpha: 0.05, bottomPool: true };
+      default: // circle
+        return { lineWidth: 4, glowAlpha: 0.36 * bf * gf, innerAlpha: 0.025 };
+    }
+  }
+
+  setShape (shape) {
+    if (!shape || shape === this._shapeTarget) return;
+    // Snapshot current visible vertices as morph start
+    this._shapeFromVerts = this._buildShapeVerts(this._shapeTarget, 1, 0, 0);
+    this._shapeTarget = shape;
+    this._shapeMorphT = 0;
+  }
+
+  _drawShapePath (ctx, verts) {
+    if (!verts || verts.length < 3) return;
+    ctx.beginPath();
+    ctx.moveTo(verts[0].x, verts[0].y);
+    for (let i = 1; i < verts.length; i++) {
+      ctx.lineTo(verts[i].x, verts[i].y);
+    }
+    ctx.closePath();
   }
 
   /* ── Particle memory: per-particle interaction fingerprint ── */
@@ -759,6 +857,27 @@ class MatrixRain {
       }
     }
 
+    // ── Water ripple spawn: driven by core velocity ──
+    const coreVX = this.core.x - this._prevCoreX;
+    const coreVY = this.core.y - this._prevCoreY;
+    const coreSpeed = Math.sqrt(coreVX * coreVX + coreVY * coreVY);
+    this._prevCoreX = this.core.x;
+    this._prevCoreY = this.core.y;
+    this._rippleTimer += 1;
+    // Spawn ripple when core moves fast enough, max every 3 frames
+    if (coreSpeed > 0.4 && this._rippleTimer > 3) {
+      this._rippleTimer = 0;
+      this._ripples.push({
+        x: this.core.x, y: this.core.y,
+        r: this.core.r * 0.6,       // start at core edge
+        maxR: this.core.r * 0.6 + coreSpeed * 35,  // bigger ripple for faster movement
+        alpha: Math.min(0.2, coreSpeed * 0.04),     // brighter for faster
+        birth: performance.now()
+      });
+      // Cap total ripples
+      if (this._ripples.length > 12) this._ripples.shift();
+    }
+
     // Time fade level lerp
     if (this._timeLerp < 1) {
       this._timeLerp = Math.min(1, this._timeLerp + this._timeLerpSpeed);
@@ -780,6 +899,12 @@ class MatrixRain {
     /* ── audio reactivity ──────────────────────────────── */
     const a = this._audio;
     const audioPulse = 1 + a.bass * 0.3 + a.mid * 0.15 + a.treble * 0.08 + a.beat * 0.25;
+
+    /* ── beat-triggered core pulse ─────────────────────── */
+    if (a.beat) {
+      this._coreExpand = performance.now();
+      this._beatFlash = performance.now();
+    }
 
     const h = this.canvas.height;
     const w = this.canvas.width;
@@ -1126,7 +1251,7 @@ class MatrixRain {
     // Core lens — nearly invisible, perceived only through refraction
     if (this.core.active) {
       /* search mode: core shrinks to 20 over 0.3s */
-      let coreR = this.core.r;
+      let coreR = this.core.r * (1 + 0.12 * this._breathDepth * Math.sin(this._breathPhase));
       if (this._searchMode) {
         const targetR = 20;
         coreR += (targetR - coreR) * 0.12;
@@ -1141,8 +1266,9 @@ class MatrixRain {
         this._pendingDot = false;
       }
 
+      const isCircle = this._coreShape === 'circle' && this._shapeMorphT >= 1;
       /* ── vortex mode: spinning ring particles ────────── */
-      if (mode === 'vortex' && !this._timeWarp) {
+      if (mode === 'vortex' && !this._timeWarp && isCircle) {
         ctx.strokeStyle = this._targetParams.color || '#22C55E';
         ctx.lineWidth = 1.5;
         ctx.globalAlpha = 0.6;
@@ -1155,7 +1281,7 @@ class MatrixRain {
       }
 
       /* ── error mode: red flicker → brownian → pulse heal ── */
-      if (mode === 'error') {
+      if (mode === 'error' && isCircle) {
         const sinceError = performance.now() - (this._coreModeStart || 0);
         /* phase 1: flicker (0-900ms) */
         if (sinceError < 900) {
@@ -1224,6 +1350,15 @@ class MatrixRain {
       if (grabAge < 80) grabFlash = 1.4;       // spike
       else if (grabAge < 250) grabFlash = 1 + 0.4 * (1 - (grabAge - 80) / 170);  // decay
 
+      // Beat flash: brief brightness spike on drum hit
+      let beatFlash = 1;
+      if (this._beatFlash) {
+        const beatAge = now - this._beatFlash;
+        if (beatAge < 60) beatFlash = 1.5;
+        else if (beatAge < 180) beatFlash = 1 + 0.5 * (1 - (beatAge - 60) / 120);
+        else this._beatFlash = 0;
+      }
+
       // Settled deep breath on return complete
       if (this._settled && !this._dragging && !this._returning) {
         const settleAge = (now - (this._settleTime || 0));
@@ -1252,51 +1387,190 @@ class MatrixRain {
       const ringInner = cr * coreScale + 1;
       const ringOuter = cr * coreScale + 5;
 
-      if (stretched && dMag > 1) {
-        // Draw deformed ring: ellipse stretched perpendicular to drag direction
-        const stretch = Math.min(0.3, dMag / 200);  // max 30% deformation
-        const sx = 1 + stretch * 0.5;  // wider perpendicular to drag
-        const sy = 1 - stretch * 0.3;  // narrower along drag
-        ctx.save();
-        ctx.translate(cx, cy);
-        ctx.rotate(Math.atan2(dY, dX));
-        ctx.scale(sx, sy);
-        ctx.beginPath();
-        ctx.arc(0, 0, ringOuter, 0, Math.PI * 2);
-        ctx.arc(0, 0, ringInner, 0, Math.PI * 2, true);
-        const ringGrad = ctx.createRadialGradient(0, 0, ringInner, 0, 0, ringOuter);
-        ringGrad.addColorStop(0, 'rgba(' + rr + ',' + gg + ',' + bb + ',0)');
-        ringGrad.addColorStop(0.3, 'rgba(' + rr + ',' + gg + ',' + bb + ',0.08)');
-        ringGrad.addColorStop(0.7, 'rgba(' + rr + ',' + gg + ',' + bb + ',' + (0.36 * breath * grabFlash).toFixed(2) + ')');
-        ringGrad.addColorStop(1, 'rgba(' + rr + ',' + gg + ',' + bb + ',0)');
-        ctx.fillStyle = ringGrad;
+      // ── Shape morph update ──
+      if (this._shapeMorphT < 1) {
+        this._shapeMorphT = Math.min(1, this._shapeMorphT + 0.03);
+        if (this._shapeMorphT >= 1) {
+          this._coreShape = this._shapeTarget;
+          this._shapeFromVerts = null;
+        }
+      }
+      if (!isCircle) {
+        // ── Shape path ring ──
+        const shapeRingOuter = cr * coreScale + 5;
+        const shapeRingInner = cr * coreScale + 1;
+        // Build target verts
+        const targetOuter = this._buildShapeVerts(this._shapeTarget, shapeRingOuter, cx, cy);
+        const targetInner = this._buildShapeVerts(this._shapeTarget, shapeRingInner, cx, cy);
+        let outerVerts, innerVerts;
+        if (this._shapeMorphT < 1 && this._shapeFromVerts) {
+          // Morph: lerp from cached start verts to target
+          const fromOuter = this._shapeFromVerts.map(function(v) {
+            return { x: cx + v.x * shapeRingOuter, y: cy + v.y * shapeRingOuter };
+          });
+          const fromInner = this._shapeFromVerts.map(function(v) {
+            return { x: cx + v.x * shapeRingInner, y: cy + v.y * shapeRingInner };
+          });
+          const t = this._shapeMorphT;
+          outerVerts = targetOuter.map(function(v, i) {
+            return { x: fromOuter[i].x + (v.x - fromOuter[i].x) * t, y: fromOuter[i].y + (v.y - fromOuter[i].y) * t };
+          });
+          innerVerts = targetInner.map(function(v, i) {
+            return { x: fromInner[i].x + (v.x - fromInner[i].x) * t, y: fromInner[i].y + (v.y - fromInner[i].y) * t };
+          });
+        } else {
+          outerVerts = targetOuter;
+          innerVerts = targetInner;
+        }
+        // ── Per-shape ring params ──
+        const ringParams = this._shapeRingParams(this._shapeTarget, breath, beatFlash, grabFlash);
+        const effectiveShape = this._shapeMorphT < 1 ? 'circle' : this._shapeTarget;
+        const lensParams = this._shapeMorphT < 1
+          ? this._shapeRingParams('circle', breath, beatFlash, grabFlash)
+          : ringParams;
+
+        // Outer glow: shape path stroke
+        ctx.strokeStyle = 'rgba(' + rr + ',' + gg + ',' + bb + ',' + ringParams.glowAlpha.toFixed(2) + ')';
+        ctx.lineWidth = ringParams.lineWidth;
         ctx.globalAlpha = 1;
+        this._drawShapePath(ctx, outerVerts);
+        ctx.stroke();
+
+        // Double layer (bloom): offset second petal overlay
+        if (ringParams.doubleLayer) {
+          const dlVerts = this._buildShapeVerts(effectiveShape, shapeRingOuter * 0.85, cx, cy);
+          ctx.strokeStyle = 'rgba(' + rr + ',' + gg + ',' + bb + ',' + (ringParams.glowAlpha * 0.5).toFixed(2) + ')';
+          ctx.lineWidth = ringParams.lineWidth * 0.6;
+          this._drawShapePath(ctx, dlVerts);
+          ctx.stroke();
+        }
+
+        // Tail arcs (swirl): draw fading tangent arcs from each arm tip
+        if (ringParams.tailArcs) {
+          const n = 80;
+          for (let i = 0; i < n; i += Math.floor(n / 3)) {
+            const theta = (i / n) * Math.PI * 2;
+            const r = shapeRingOuter * this._shapeRadius(effectiveShape, theta);
+            const tx = cx + Math.cos(theta) * r;
+            const ty = cy + Math.sin(theta) * r;
+            ctx.beginPath();
+            ctx.arc(tx, ty, 4, theta - 0.5, theta + 0.5);
+            ctx.strokeStyle = 'rgba(' + rr + ',' + gg + ',' + bb + ',' + (ringParams.glowAlpha * 0.3).toFixed(2) + ')';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+          }
+        }
+
+        // Corner dots (hexagon): small dots at vertices
+        if (ringParams.cornerDots) {
+          for (let i = 0; i < 6; i++) {
+            const theta = (i / 6) * Math.PI * 2;
+            const r = shapeRingOuter * this._shapeRadius(effectiveShape, theta);
+            ctx.beginPath();
+            ctx.arc(cx + Math.cos(theta) * r, cy + Math.sin(theta) * r, 2, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(' + rr + ',' + gg + ',' + bb + ',0.6)';
+            ctx.fill();
+          }
+        }
+
+        // Inner subtle stroke
+        ctx.strokeStyle = 'rgba(' + rr + ',' + gg + ',' + bb + ',0.06)';
+        ctx.lineWidth = 1;
+        this._drawShapePath(ctx, innerVerts);
+        ctx.stroke();
+
+        // Lens fill with per-shape alpha
+        const lensVerts = this._buildShapeVerts(effectiveShape, cr * 0.85, cx, cy);
+        ctx.fillStyle = 'rgba(' + rr + ',' + gg + ',' + bb + ',' + lensParams.innerAlpha.toFixed(3) + ')';
+        this._drawShapePath(ctx, lensVerts);
         ctx.fill();
-        ctx.restore();
+
+        // Bottom glow (heart/drop): extra fill pool at bottom
+        if (ringParams.bottomGlow || ringParams.bottomPool) {
+          const poolAlpha = ringParams.bottomPool ? 0.06 : 0.03;
+          const poolR = cr * (ringParams.bottomPool ? 0.5 : 0.35);
+          ctx.fillStyle = 'rgba(' + rr + ',' + gg + ',' + bb + ',' + poolAlpha.toFixed(3) + ')';
+          ctx.beginPath();
+          ctx.arc(cx, cy + cr * 0.35, poolR, 0, Math.PI * 2);
+          ctx.fill();
+        }
       } else {
-        // Normal round ring
+        // ── Normal round ring (circle shape) ──
+        if (stretched && dMag > 1) {
+          const stretch = Math.min(0.3, dMag / 200);
+          const sx = 1 + stretch * 0.5;
+          const sy = 1 - stretch * 0.3;
+          ctx.save();
+          ctx.translate(cx, cy);
+          ctx.rotate(Math.atan2(dY, dX));
+          ctx.scale(sx, sy);
+          ctx.beginPath();
+          ctx.arc(0, 0, ringOuter, 0, Math.PI * 2);
+          ctx.arc(0, 0, ringInner, 0, Math.PI * 2, true);
+          const ringGrad = ctx.createRadialGradient(0, 0, ringInner, 0, 0, ringOuter);
+          ringGrad.addColorStop(0, 'rgba(' + rr + ',' + gg + ',' + bb + ',0)');
+          ringGrad.addColorStop(0.3, 'rgba(' + rr + ',' + gg + ',' + bb + ',0.08)');
+          ringGrad.addColorStop(0.7, 'rgba(' + rr + ',' + gg + ',' + bb + ',' + (0.36 * breath * grabFlash * beatFlash).toFixed(2) + ')');
+          ringGrad.addColorStop(1, 'rgba(' + rr + ',' + gg + ',' + bb + ',0)');
+          ctx.fillStyle = ringGrad;
+          ctx.globalAlpha = 1;
+          ctx.fill();
+          ctx.restore();
+        } else {
+          ctx.beginPath();
+          ctx.arc(cx, cy, ringOuter, 0, Math.PI * 2);
+          ctx.arc(cx, cy, ringInner, 0, Math.PI * 2, true);
+          const ringGrad = ctx.createRadialGradient(cx, cy, ringInner, cx, cy, ringOuter);
+          ringGrad.addColorStop(0, 'rgba(' + rr + ',' + gg + ',' + bb + ',0)');
+          ringGrad.addColorStop(0.3, 'rgba(' + rr + ',' + gg + ',' + bb + ',0.08)');
+          ringGrad.addColorStop(0.7, 'rgba(' + rr + ',' + gg + ',' + bb + ',' + (0.36 * breath * grabFlash * beatFlash).toFixed(2) + ')');
+          ringGrad.addColorStop(1, 'rgba(' + rr + ',' + gg + ',' + bb + ',0)');
+          ctx.fillStyle = ringGrad;
+          ctx.globalAlpha = 1;
+          ctx.fill();
+        }
+
+        // Lens gradient fill
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, cr);
+        grad.addColorStop(0, `rgba(${rr},${gg},${bb},0.04)`);
+        grad.addColorStop(0.15, `rgba(${rr},${gg},${bb},0.01)`);
+        grad.addColorStop(1, `rgba(${rr},${gg},${bb},0)`);
+        ctx.fillStyle = grad;
         ctx.beginPath();
-        ctx.arc(cx, cy, ringOuter, 0, Math.PI * 2);
-        ctx.arc(cx, cy, ringInner, 0, Math.PI * 2, true);
-        const ringGrad = ctx.createRadialGradient(cx, cy, ringInner, cx, cy, ringOuter);
-        ringGrad.addColorStop(0, 'rgba(' + rr + ',' + gg + ',' + bb + ',0)');
-        ringGrad.addColorStop(0.3, 'rgba(' + rr + ',' + gg + ',' + bb + ',0.08)');
-        ringGrad.addColorStop(0.7, 'rgba(' + rr + ',' + gg + ',' + bb + ',' + (0.36 * breath * grabFlash).toFixed(2) + ')');
-        ringGrad.addColorStop(1, 'rgba(' + rr + ',' + gg + ',' + bb + ',0)');
-        ctx.fillStyle = ringGrad;
-        ctx.globalAlpha = 1;
+        ctx.arc(cx, cy, cr, 0, Math.PI * 2);
         ctx.fill();
       }
+    }
 
-      // Lens gradient fill — use atmosphere color, not hardcoded green
-      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, cr);
-      grad.addColorStop(0, `rgba(${rr},${gg},${bb},0.04)`);
-      grad.addColorStop(0.15, `rgba(${rr},${gg},${bb},0.01)`);
-      grad.addColorStop(1, `rgba(${rr},${gg},${bb},0)`);
-      ctx.fillStyle = grad;
+    // ── Water ripples: expanding rings around core ──
+    const nowR = performance.now();
+    for (let i = this._ripples.length - 1; i >= 0; i--) {
+      const rip = this._ripples[i];
+      const age = nowR - rip.birth;
+      const life = 600;  // ripple lifetime in ms
+      if (age > life) {
+        this._ripples.splice(i, 1);
+        continue;
+      }
+      const progress = age / life;  // 0 → 1
+      rip.r = rip.maxR * (0.05 + 0.95 * progress);  // expand from center
+      rip.alpha = rip.alpha * (1 - progress);        // fade out
+      if (rip.alpha < 0.005) continue;
+      // Draw ripple ring
       ctx.beginPath();
-      ctx.arc(cx, cy, cr, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.arc(rip.x, rip.y, rip.r, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(' + _rr + ',' + _gg + ',' + _bb + ',' + rip.alpha.toFixed(3) + ')';
+      ctx.lineWidth = 1.5 * (1 - progress * 0.7);
+      ctx.globalAlpha = 1;
+      ctx.stroke();
+      // Secondary ghost ring (double ripple for depth)
+      if (progress > 0.3 && progress < 0.8) {
+        ctx.beginPath();
+        ctx.arc(rip.x, rip.y, rip.r * 0.7, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(' + _rr + ',' + _gg + ',' + _bb + ',' + (rip.alpha * 0.4).toFixed(3) + ')';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
     }
 
     ctx.globalAlpha = 1;
