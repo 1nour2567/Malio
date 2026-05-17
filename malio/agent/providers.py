@@ -30,13 +30,49 @@ class OpenAICompatibleProvider(LLMProvider):
         self.max_tokens = max_tokens
 
     def generate(self, prompt: str, **kwargs) -> str:
+        return self._call_api([{"role": "user", "content": prompt}], **kwargs)
+
+    def generate_with_tools(self, messages: list, tools: list, **kwargs) -> dict:
+        """OpenAI-compatible function calling. Returns full message object."""
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}"
         }
         data = {
             "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": messages,
+            "tools": tools,
+            "temperature": kwargs.get("temperature", self.temperature),
+            "max_tokens": kwargs.get("max_tokens", self.max_tokens),
+        }
+        resp = requests.post(
+            f"{self.base_url}/chat/completions",
+            headers=headers, json=data, timeout=60
+        )
+        if not resp.ok:
+            print(f"[provider] {self.name} error {resp.status_code}: {resp.text[:500]}")
+        resp.raise_for_status()
+        result = resp.json()
+        if "error" in result:
+            return {"content": f"API Error: {result['error'].get('message', str(result['error']))}", "tool_calls": None}
+        choices = result.get("choices", [])
+        if not choices:
+            return {"content": "", "tool_calls": None}
+        msg = choices[0].get("message", {})
+        return {
+            "content": msg.get("content", ""),
+            "tool_calls": msg.get("tool_calls", None),
+            "reasoning_content": msg.get("reasoning_content", None),
+        }
+
+    def _call_api(self, messages: list, **kwargs) -> str:
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}"
+        }
+        data = {
+            "model": self.model,
+            "messages": messages,
             "temperature": kwargs.get("temperature", self.temperature),
             "max_tokens": kwargs.get("max_tokens", self.max_tokens),
         }
@@ -99,22 +135,22 @@ class ProviderRegistry:
 def create_providers_from_config(settings) -> ProviderRegistry:
     registry = ProviderRegistry()
 
-    # Kimi (always register — primary Chinese LLM)
-    if settings.kimi_api_key:
-        registry.register(OpenAICompatibleProvider(
-            name="kimi", api_key=settings.kimi_api_key,
-            base_url=getattr(settings, 'kimi_api_base', 'https://api.moonshot.cn/v1'),
-            model=getattr(settings, 'kimi_model', 'kimi-k2.5'),
-            temperature=1.0  # kimi-k2.5 requires temperature=1
-        ))
-
-    # DeepSeek
+    # DeepSeek Flash (primary — fast, supports function calling)
     ds_key = getattr(settings, 'deepseek_api_key', '')
     if ds_key:
         registry.register(OpenAICompatibleProvider(
             name="deepseek", api_key=ds_key,
             base_url="https://api.deepseek.com/v1",
-            model="deepseek-chat", temperature=0.7
+            model=getattr(settings, 'deepseek_model', 'deepseek-v4-flash'), temperature=0.7
+        ))
+
+    # Kimi k2.5 (fallback — no function calling support)
+    if settings.kimi_api_key:
+        registry.register(OpenAICompatibleProvider(
+            name="kimi", api_key=settings.kimi_api_key,
+            base_url=getattr(settings, 'kimi_api_base', 'https://api.moonshot.cn/v1'),
+            model=getattr(settings, 'kimi_model', 'kimi-k2.5'),
+            temperature=1.0
         ))
 
     return registry

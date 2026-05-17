@@ -40,7 +40,8 @@ class Feedback:
             "agent_log": "",
             "tool_error": None,
             "atmosphere": None,
-            "core_mode": "dot",      # dot / vortex / helix / error
+            "core_mode": "dot",      # dot / vortex / error
+            "core_action": None,     # Agent-commanded core action
             "timestamp": datetime.now().isoformat(),
             "seq": self._seq,
         }
@@ -53,13 +54,25 @@ class Feedback:
         for ws in self._connections:
             try:
                 await ws.send_json(snapshot)
-            except Exception:
+            except Exception as exc:
+                print(f"[feedback] send failed: {exc}")
                 dead.append(ws)
         for ws in dead:
             self.unregister(ws)
 
     async def push_agent_log(self, message: str):
         await self.push_snapshot(agent_log=message)
+
+    async def push_rule(self, rule: Dict[str, Any]):
+        """Broadcast a DSL rule to all connected WebSocket clients."""
+        dead = []
+        for ws in self._connections:
+            try:
+                await ws.send_json({"type": "rule", "rule": rule})
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.unregister(ws)
 
     def push_atmosphere_sync(self, atmosphere: Dict[str, Any]):
         """同步构建 atmosphere 快照，供规则引擎或 Agent 调用后由外部 await push."""

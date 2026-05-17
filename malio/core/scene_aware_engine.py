@@ -60,13 +60,24 @@ class SceneAwareEngine:
             response.raise_for_status()
             data = response.json()
             
+            main = data.get("main", {})
+            wind = data.get("wind", {})
             return {
                 "condition": data.get("weather", [{}])[0].get("main"),
                 "description": data.get("weather", [{}])[0].get("description"),
-                "temperature": data.get("main", {}).get("temp"),
-                "humidity": data.get("main", {}).get("humidity"),
-                "wind_speed": data.get("wind", {}).get("speed"),
-                "icon": data.get("weather", [{}])[0].get("icon")
+                "temperature": main.get("temp"),
+                "feels_like": main.get("feels_like"),
+                "humidity": main.get("humidity"),
+                "pressure": main.get("pressure"),
+                "wind_speed": wind.get("speed"),
+                "wind_gust": wind.get("gust"),
+                "wind_deg": wind.get("deg"),
+                "visibility": data.get("visibility"),
+                "clouds": data.get("clouds", {}).get("all"),
+                "icon": data.get("weather", [{}])[0].get("icon"),
+                "sunrise": data.get("sys", {}).get("sunrise"),
+                "sunset": data.get("sys", {}).get("sunset"),
+                "city": data.get("name"),
             }
         except Exception as e:
             print(f"Error getting weather: {e}")

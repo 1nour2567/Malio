@@ -20,9 +20,16 @@ const state = {
   ttsVoices: [],
   selectedVoiceId: 'CwhRBWXzGAHq8TQ4Fs17',
   isSpeaking: false,
+  lastSnapshotSeq: 0,           /* reject stale snapshots */
   libraryStats: { songs: 0, playlists: 0, listening_history: 0 },
   /* panel state */
-  activePanel: null            /* 'chat' | 'search' | null */
+  activePanel: null,           /* 'chat' | 'search' | null */
+  /* ── identity ──────────────────────────────────────────── */
+  userId: localStorage.getItem('malio_user_id') || (function () {
+    var id = 'u_' + Math.random().toString(36).slice(2, 10);
+    localStorage.setItem('malio_user_id', id);
+    return id;
+  }())
 };
 
 /* ── DOM refs ────────────────────────────────────────────────── */
@@ -113,16 +120,31 @@ document.addEventListener('DOMContentLoaded', () => {
   cacheDom();
   setInitTime();
   loadVoices();
-  fetchRecommendations();
+  fastLoadInitialSong();
   fetchLibraryStats();
   bindEvents();
   setupWsClient();
+  fetchSessionResume();
   initAudioReactivity();
   initParticleRules();
   startParticleMood();
   initIdleTimer();
   injectSongLibrary();
   loadSongList();  // preload for library panel
+
+  /* ── 30s heartbeat: state consistency check ────────────────── */
+  setInterval(function () {
+    if (wsClient && state.currentSong && state.currentSong.id) {
+      wsClient.sendGuaranteed({
+        action: 'heartbeat',
+        user_id: state.userId,
+        current_song_id: state.currentSong.id,
+        is_playing: state.isPlaying,
+        playlist_index: state.playlistIndex
+      });
+    }
+  }, 30000);
+
   if (typeof engine !== 'undefined') {
     engine.onTimeWarp = function (active) {
       if (active) {
@@ -151,6 +173,53 @@ if (typeof engine !== 'undefined') {
       if (typeof prevSong === 'function') prevSong();
     }
   };
+
+  /* search mode */
+  engine.onSearchStart = function () {
+    var existing = document.getElementById('search-ball-input');
+    if (existing) { existing.remove(); }
+    var topBar = document.getElementById('top-bar');
+    if (!topBar) return;
+    var input = document.createElement('input');
+    input.id = 'search-ball-input';
+    input.type = 'text';
+    input.placeholder = '搜索音乐...';
+    input.autocomplete = 'off';
+    input.style.cssText = 'width:140px;height:28px;border:1px solid var(--accent-border);border-radius:14px;padding:0 12px;background:var(--bg-glass);color:#fff;font-size:13px;outline:none;margin-left:8px;';
+    input.addEventListener('input', function () {
+      if (typeof engine !== 'undefined') engine.updateSearchInput(this.value.length);
+    });
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { executeSearch(this.value); }
+      if (e.key === 'Escape') { cancelSearch(input); }
+    });
+    topBar.appendChild(input);
+    setTimeout(function () { input.focus(); }, 100);
+  };
+  engine.onSearchEnd = function () {
+    var input = document.getElementById('search-ball-input');
+    if (input) input.remove();
+  };
+  engine.onSearchCollapse = function () {
+    var input = document.getElementById('search-ball-input');
+    var query = input ? input.value.trim() : '';
+    if (input) input.remove();
+    if (query) executeSearch(query);
+  };
+
+  function executeSearch (query) {
+    if (typeof engine !== 'undefined' && engine._searchMode) engine.endSearch();
+    if (query && typeof searchNetease === 'function') {
+      var si = document.getElementById('search-input');
+      if (si) { si.value = query; searchNetease(); }
+      /* open search panel to show results */
+      togglePanel('search');
+    }
+  }
+  function cancelSearch (input) {
+    if (typeof engine !== 'undefined') engine.endSearch();
+    if (input) input.remove();
+  }
 
   engine.onCaptureComplete = function (capturedSongs) {
     if (!capturedSongs || !capturedSongs.length) return;
@@ -193,6 +262,9 @@ function bindEvents () {
     dom.volumeSlider.addEventListener('input', function (e) {
       dom.audioPlayer.volume = e.target.value / 100;
     });
+    dom.volumeSlider.addEventListener('change', function (e) {
+      if (wsClient) wsClient.sendCoreEvent('volume_change', { to: parseInt(e.target.value) });
+    });
     dom.audioPlayer.volume = dom.volumeSlider.value / 100;
   }
 
@@ -215,7 +287,7 @@ function bindEvents () {
     dom.audioPlayer.addEventListener('ended', function () {
       state.isPlaying = false;
       updatePlayIcon();
-      nextSong();
+      nextSong('ended');
     });
     dom.audioPlayer.addEventListener('play', function () {
       state.isPlaying = true;
@@ -252,10 +324,15 @@ function bindEvents () {
   if (dom.btnTtsToggle)    dom.btnTtsToggle.addEventListener('click', toggleTts);
   if (dom.btnAutoPlay)     dom.btnAutoPlay.addEventListener('click', toggleAutoPlay);
 
+  /* Hide player */
   var btnHide = document.getElementById('btn-hide-player');
   if (btnHide) btnHide.addEventListener('click', function () {
     document.body.classList.toggle('player-hidden');
     btnHide.classList.toggle('active', document.body.classList.contains('player-hidden'));
+  });
+  /* Menu button: open library panel */
+  if (dom.btnMenu) dom.btnMenu.addEventListener('click', function () {
+    togglePanel('library');
   });
 
   /* Panel toggles */
@@ -272,10 +349,6 @@ function bindEvents () {
   });
   if (dom.btnChatClose)    dom.btnChatClose.addEventListener('click', function () {
     togglePanel('chat');
-  });
-
-  if (dom.btnMenu) dom.btnMenu.addEventListener('click', function () {
-    togglePanel('library');
   });
 
   if (dom.btnManagerToggle) dom.btnManagerToggle.addEventListener('click', function () {
@@ -359,9 +432,10 @@ function togglePanel (name) {
   const panel = panels[name];
 
   /* If no panel was found, bail silently */
-  if (!panel) return;
+  if (!panel) { console.warn('[togglePanel] panel not found:', name); return; }
 
   const isCurrentlyOpen = state.activePanel === name;
+  console.log('[togglePanel]', name, 'isCurrentlyOpen:', isCurrentlyOpen, 'panel.hidden:', panel.hidden);
 
   /* Close any open panel first */
   closeAllPanels();
@@ -414,8 +488,10 @@ function togglePlay () {
   if (!state.currentSong.previewUrl && !state.currentSong.audioPath) return;
   if (state.isPlaying) {
     dom.audioPlayer.pause();
+    if (wsClient) wsClient.sendCoreEvent('pause', { song_id: state.currentSong.id, title: state.currentSong.title });
   } else {
     dom.audioPlayer.play().catch(function () {});
+    if (wsClient) wsClient.sendCoreEvent('play', { song_id: state.currentSong.id, title: state.currentSong.title });
   }
 }
 
@@ -471,11 +547,23 @@ function setCurrentSong (song) {
   }
   if (dom.songAlbum)  dom.songAlbum.textContent = state.currentSong.album;
 
-  /* Album art */
+  /* Album art + extract cover color */
   if (state.currentSong.albumArt) {
     if (dom.albumArtImg) {
+      dom.albumArtImg.crossOrigin = 'anonymous';
       dom.albumArtImg.src = state.currentSong.albumArt;
       dom.albumArtImg.hidden = false;
+      /* extract dominant color on load */
+      dom.albumArtImg.onload = function () {
+        var coverColor = typeof extractDominantColor === 'function'
+          ? extractDominantColor(dom.albumArtImg) : null;
+        if (coverColor && typeof engine !== 'undefined') {
+          engine._coverColor = coverColor;
+          engine._coverSetAt = performance.now();
+          engine.triggerLightBurst(coverColor);
+          engine.updateParams({ color: coverColor }, 0.12);
+        }
+      };
     }
     if (dom.albumArtPlaceholder) dom.albumArtPlaceholder.hidden = true;
   } else {
@@ -492,10 +580,38 @@ function setCurrentSong (song) {
     if (state.isPlaying) dom.audioPlayer.play().catch(function () {});
   }
 
-  /* ── Particle: bump amplitude on song change ─────────── */
+  /* ── Immediate color from E/W/D on song change ───────── */
   if (typeof engine !== 'undefined') {
-    engine.updateParams({ amplitude: Math.min(2.5, (engine.params.amplitude || 1) + 0.6) });
-    /* gradually return after 800ms */
+    var ew = song.energy != null ? song.energy : 0.5;
+    var wm = song.warmth != null ? song.warmth : 0.5;
+    var dn = song.density != null ? song.density : 0.5;
+    // HSL: energy→hue (240→0), warmth→sat (30%→90%), density→light (75%→25%)
+    var h = Math.round(240 - ew * 240);  // 240°=blue(cold), 0°=red(hot)
+    var s = Math.round(30 + wm * 60);     // 30%=muted, 90%=vivid
+    var l = Math.round(75 - dn * 50);      // 75%=bright, 25%=dark
+    var ewColor = hslToHex(h, s, l);
+    state._ewdColor = ewColor;
+    engine._coverSetAt = performance.now();
+    engine.updateParams({ amplitude: Math.min(2.5, (engine.params.amplitude || 1) + 0.6) }, 0.06);
+    clearTimeout(state._colorTimer);
+    state._colorTimer = setTimeout(function () {
+      // Blend all sources, push to nebula too
+      var blended = blendAllColors();
+      var light = lightenColor(blended, 0.45);
+      if (typeof engine !== 'undefined') {
+        engine.updateParams({ color: light }, 0.065);
+        if (engine._nebula && engine._nebula.particles) {
+          var r = parseInt(blended.slice(1,3),16), g = parseInt(blended.slice(3,5),16), b = parseInt(blended.slice(5,7),16);
+          for (var ni = 0; ni < engine._nebula.particles.length; ni++) {
+            var p = engine._nebula.particles[ni];
+            if (!p._rgb) p._rgb = {r:r, g:g, b:b};
+            p._rgb.r = Math.round(p._rgb.r + (r - p._rgb.r) * 0.3);
+            p._rgb.g = Math.round(p._rgb.g + (g - p._rgb.g) * 0.3);
+            p._rgb.b = Math.round(p._rgb.b + (b - p._rgb.b) * 0.3);
+          }
+        }
+      }
+    }, 700);
     clearTimeout(state._ampReset);
     state._ampReset = setTimeout(function () {
       if (typeof engine !== 'undefined') {
@@ -517,16 +633,34 @@ function prevSong () {
   if (dom.audioPlayer) dom.audioPlayer.play().catch(function () {});
 }
 
-function nextSong () {
-  if (state.playlist.length === 0) return;
-  state.playlistIndex = (state.playlistIndex + 1) % state.playlist.length;
-  var song = state.playlist[state.playlistIndex];
-  if (typeof engine !== 'undefined' && engine.triggerLightBurst) {
-    engine.triggerLightBurst(song.album_art ? '#22C55E' : null);
+function nextSong (skipSource) {
+  /* advance locally immediately, backend syncs asynchronously */
+  if (state.playlist.length > 0) {
+    state.playlistIndex = (state.playlistIndex + 1) % state.playlist.length;
+    setCurrentSong(state.playlist[state.playlistIndex]);
+    state.isPlaying = true;
+    if (dom.audioPlayer) dom.audioPlayer.play().catch(function () {});
   }
+  if (wsClient) {
+    var source = skipSource || 'user';
+    if (window._songBroken) { source = 'broken'; window._songBroken = false; }
+    var detail = { direction: 'right', source: source };
+    if (source === 'broken') detail.reason = 'broken_url';
+    wsClient.sendCoreEvent('song_skip', detail);
+  }
+  if (typeof engine !== 'undefined' && engine.triggerLightBurst) {
+    engine.triggerLightBurst('#22C55E');
+  }
+}
+
+function _applySongFromWS (song) {
   setCurrentSong(song);
   state.isPlaying = true;
-  if (dom.audioPlayer) dom.audioPlayer.play().catch(function () {});
+  updatePlayIcon();
+  if (dom.audioPlayer) {
+    dom.audioPlayer.load();
+    dom.audioPlayer.play().catch(function () {});
+  }
 }
 
 /* Refresh expired NetEase URL */
@@ -534,23 +668,34 @@ let _refreshInProgress = false;
 async function refreshExpiredUrl () {
   const songId = state.currentSong.id;
   if (!songId || _refreshInProgress) return;
-  if (!/^\d{4,}$/.test(songId)) return;
 
   _refreshInProgress = true;
+  var refreshed = false;
   try {
-    const res = await fetch('/api/netease/track/' + songId + '/url');
-    const data = await res.json();
-    if (data.url) {
-      state.currentSong.previewUrl = data.url;
-      if (dom.audioPlayer) {
-        dom.audioPlayer.src = data.url;
-        dom.audioPlayer.load();
+    if (/^\d{4,}$/.test(songId)) {
+      const res = await fetch('/api/netease/track/' + songId + '/url');
+      const data = await res.json();
+      if (data.url) {
+        state.currentSong.previewUrl = data.url;
+        if (dom.audioPlayer) {
+          dom.audioPlayer.src = data.url;
+          dom.audioPlayer.load();
+          dom.audioPlayer.play().catch(function () {});
+        }
+        refreshed = true;
       }
     }
   } catch (err) {
     console.error('Failed to refresh URL:', err);
   } finally {
     _refreshInProgress = false;
+  }
+
+  // If refresh failed, mark as broken then skip
+  if (!refreshed) {
+    console.warn('Song unavailable, auto-skipping to next');
+    _songBroken = true;
+    setTimeout(function () { nextSong(); }, 500);
   }
 }
 
@@ -566,12 +711,16 @@ async function sendMessage () {
   dom.chatInput.value = '';
   if (dom.chatLoading) dom.chatLoading.hidden = false;
   if (dom.btnSend) dom.btnSend.disabled = true;
+  /* unlock audio — browser requires user gesture for play() */
+  if (dom.audioPlayer && dom.audioPlayer.paused) {
+    dom.audioPlayer.play().then(function () { dom.audioPlayer.pause(); dom.audioPlayer.currentTime = 0; }).catch(function () {});
+  }
 
   try {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input: text })
+      body: JSON.stringify({ user_id: state.userId, input: text })
     });
     const data = await res.json();
 
@@ -581,7 +730,9 @@ async function sendMessage () {
       state.recommendations = data.recommendations;
       state.playlist = data.recommendations;
       state.playlistIndex = 0;
-      tryAutoPlay();
+      if (data.auto_play && data.recommendations[0]) {
+        _applySongFromWS(data.recommendations[0]);
+      }
     }
 
     if (state.ttsEnabled) playTTS(data.response);
@@ -716,6 +867,69 @@ function toggleAutoPlay () {
   }
 }
 
+function lightenColor (hex, factor) {
+  /* Desaturate + lighten a hex color. factor 0-1: 0.5 = 50% toward white. */
+  if (!hex || hex.length < 7) return hex || '#27AE60';
+  var r = parseInt(hex.slice(1, 3), 16);
+  var g = parseInt(hex.slice(3, 5), 16);
+  var b = parseInt(hex.slice(5, 7), 16);
+  // Desaturate: pull toward gray
+  var gray = r * 0.299 + g * 0.587 + b * 0.114;
+  r = Math.round(r + (gray - r) * 0.35);
+  g = Math.round(g + (gray - g) * 0.35);
+  b = Math.round(b + (gray - b) * 0.35);
+  // Lighten: pull toward white by factor
+  r = Math.min(255, Math.round(r + (255 - r) * factor));
+  g = Math.min(255, Math.round(g + (255 - g) * factor));
+  b = Math.min(255, Math.round(b + (255 - b) * factor));
+  return '#' + r.toString(16).padStart(2, '0') + g.toString(16).padStart(2, '0') + b.toString(16).padStart(2, '0');
+}
+
+function blendAllColors () {
+  /* Weighted blend: persona+weather 45%, E/W/D 30%, cover 15%, jitter 10% */
+  var atm = state._personaColor || '#27AE60';
+  var ewd = state._ewdColor || atm;
+  var cov = state._coverColor || ewd;
+  var weights = [0.45, 0.40, 0.10];
+  var hexes = [atm, ewd, cov];
+  var tr = 0, tg = 0, tb = 0, tw = 0;
+  for (var i = 0; i < 3; i++) {
+    var h = hexes[i] || '#27AE60';
+    var wt = weights[i];
+    tr += parseInt(h.slice(1,3),16) * wt;
+    tg += parseInt(h.slice(3,5),16) * wt;
+    tb += parseInt(h.slice(5,7),16) * wt;
+    tw += wt;
+  }
+  // Random jitter 10%
+  tr += (Math.random() - 0.5) * 26;
+  tg += (Math.random() - 0.5) * 26;
+  tb += (Math.random() - 0.5) * 26;
+  tw += 0.05;
+  tr = Math.max(0, Math.min(255, Math.round(tr / tw)));
+  tg = Math.max(0, Math.min(255, Math.round(tg / tw)));
+  tb = Math.max(0, Math.min(255, Math.round(tb / tw)));
+  return '#' + tr.toString(16).padStart(2,'0') + tg.toString(16).padStart(2,'0') + tb.toString(16).padStart(2,'0');
+}
+
+function applyBlendedColor (lerpSpd) {
+  if (typeof engine === 'undefined') return;
+  var blended = blendAllColors();
+  var light = lightenColor(blended, 0.45);
+  engine.updateParams({ color: light }, lerpSpd != null ? lerpSpd : 0.015);
+}
+
+function hslToHex (h, s, l) {
+  s /= 100; l /= 100;
+  var a = s * Math.min(l, 1 - l);
+  var f = function (n) {
+    var k = (n + h / 30) % 12;
+    var c = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+    return Math.round(255 * c).toString(16).padStart(2, '0');
+  };
+  return '#' + f(0) + f(8) + f(4);
+}
+
 function tryAutoPlay () {
   if (!state.autoPlayEnabled) return;
   if (state.isPlaying) return;
@@ -729,6 +943,35 @@ function tryAutoPlay () {
 /* ═══════════════════════════════════════════════════════════════
    RECOMMENDATIONS
    ═══════════════════════════════════════════════════════════════ */
+
+async function fastLoadInitialSong () {
+  try {
+    var res = await fetch('/api/songs');
+    var data = await res.json();
+    if (data.songs && data.songs.length) {
+      state.playlist = data.songs;
+      state.playlistIndex = 0;
+      setCurrentSong(data.songs[0]);
+      dom.audioPlayer.preload = 'auto';
+      // Sync playlist to backend so song_skip knows the queue
+      if (wsClient) wsClient.sendGuaranteed({ action: 'sync_playlist', user_id: state.userId, songs: data.songs });
+    }
+  } catch (e) { console.error('fastLoadInitialSong:', e); }
+}
+
+async function fetchSessionResume () {
+  try {
+    var res = await fetch('/api/session/resume?user_id=' + state.userId);
+    var data = await res.json();
+    if (data.has_session && data.current_song) {
+      addMessage(
+        '欢迎回来！上次听到 ' + data.current_song + ' — ' + data.current_artist +
+        '，队列里还有 ' + data.queue_size + ' 首歌。',
+        'malio'
+      );
+    }
+  } catch (e) { /* silent */ }
+}
 
 async function fetchRecommendations () {
   try {
@@ -1245,7 +1488,8 @@ var _agentLogTimer = null;
 function showAgentLog (message) {
   if (!dom.agentLog) return;
 
-  dom.agentLog.textContent = message;
+  var logText = document.getElementById('agent-log-text');
+  if (logText) logText.textContent = message;
   dom.agentLog.hidden = false;
 
   /* Clear any pending auto-hide */
@@ -1284,8 +1528,12 @@ function setupWsClient () {
   };
 
   wsClient.onSnapshot = function (data) {
-    if (data.song) {
-      setCurrentSong(data.song);
+    // Reject stale snapshots (version-based ABA guard)
+    if (data.seq !== undefined && data.seq <= state.lastSnapshotSeq) return;
+    if (data.seq !== undefined) state.lastSnapshotSeq = data.seq;
+
+    if (data.song && data.song.title) {
+      _applySongFromWS(data.song);
     }
     if (data.is_playing !== undefined) {
       state.isPlaying = data.is_playing;
@@ -1296,6 +1544,17 @@ function setupWsClient () {
     }
     if (data.core_mode && typeof engine !== 'undefined') {
       engine.setCoreMode(data.core_mode);
+    }
+    if (data.core_action && typeof engine !== 'undefined') {
+      _executeCoreAction(data.core_action);
+    }
+    if (data.atmosphere && typeof engine !== 'undefined') {
+      // Store persona color, apply weighted blend
+      if (data.atmosphere.color) state._personaColor = data.atmosphere.color;
+      var atm = Object.assign({}, data.atmosphere);
+      delete atm.color; delete atm.amplitude; delete atm.density;
+      engine.updateParams(atm, 0.015);
+      applyBlendedColor();
     }
   };
 
@@ -1310,6 +1569,52 @@ function setupWsClient () {
       state.playlist = data.playlist || [];
     }
   };
+}
+
+function _executeCoreAction (ca) {
+  if (!engine) return;
+  var action = ca.action;
+  var params = ca.params || {};
+  switch (action) {
+    case 'set_mode':
+      engine.setCoreMode(params.mode || 'dot');
+      break;
+    case 'light_burst':
+      engine.triggerLightBurst(params.color);
+      break;
+    case 'move_core':
+      engine.core.x = params.x !== undefined ? params.x : engine.core.x;
+      engine.core.y = params.y !== undefined ? params.y : engine.core.y;
+      engine._settled = false;
+      engine._returning = true;
+      break;
+    case 'set_size':
+      if (params.radius) engine.core.r = Math.max(10, Math.min(80, params.radius));
+      break;
+    case 'time_warp':
+      if (params.active && !engine._timeWarp) {
+        engine._timeWarp = true;
+        engine._timeWarpStart = performance.now();
+        engine._timeWarpBubble = 0;
+        if (typeof engine.onTimeWarp === 'function') engine.onTimeWarp(true);
+      } else if (!params.active && engine._timeWarp) {
+        engine._timeWarp = false;
+        if (typeof engine.onTimeWarp === 'function') engine.onTimeWarp(false);
+      }
+      break;
+    case 'breath':
+      engine.setBreath(params.rate, params.depth);
+      break;
+    case 'set_speed':
+      engine.updateParams({ speed: params.speed || 1.0 }, 0.03);
+      break;
+    case 'set_color':
+      engine.updateParams({ color: params.color || '#22C55E' }, 0.03);
+      break;
+    case 'set_density':
+      engine.updateParams({ amplitude: params.amplitude || 0.4 }, 0.05);
+      break;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════

@@ -40,7 +40,7 @@ const SYSTEM_RULES = [
     ]},
     then: [
       { target: 'brightness', op: 'lerp_to', val: 0.35, rate: 0.01 },
-      { target: 'speed', op: 'mult', val: 0.85 },
+      { target: 'speed', op: 'set', val: 2.5 },
       { target: 'amplitude', op: 'mult', val: 0.7 },
     ],
   },
@@ -49,7 +49,7 @@ const SYSTEM_RULES = [
     source: 'system',
     when: { type: 'idle_gt', val: 300 /* seconds */ },
     then: [
-      { target: 'speed', op: 'mult', val: 0.85 },
+      { target: 'speed', op: 'set', val: 2.0 },
       { target: 'density_max', op: 'set', val: 0.7 },
     ],
     endWhen: { type: 'event', val: 'user_activity' },
@@ -270,7 +270,7 @@ class ParticleRules {
       }
       /* clamp physical ranges */
       if (a.target === 'brightness') p[a.target] = Math.max(0.1, Math.min(1.5, p[a.target]));
-      if (a.target === 'speed') p[a.target] = Math.max(0.2, Math.min(3, p[a.target]));
+      if (a.target === 'speed') p[a.target] = Math.max(0.2, Math.min(8, p[a.target]));
       if (a.target === 'amplitude') p[a.target] = Math.max(0, Math.min(3, p[a.target]));
     }
   }

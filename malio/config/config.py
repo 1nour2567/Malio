@@ -6,6 +6,10 @@ class Settings(BaseSettings):
     """Application settings"""
     # API Keys
     kimi_api_key: str = ""
+    deepseek_api_key: str = ""
+    deepseek_model: str = "deepseek-v4-flash"
+    kimi_model: str = "kimi-k2.5"
+    kimi_api_base: str = "https://api.moonshot.cn/v1"
     anthropic_api_key: str = ""
     spotify_client_id: str = ""
     spotify_client_secret: str = ""
@@ -17,7 +21,7 @@ class Settings(BaseSettings):
     ncm_cookie: str = ""
 
     # Database
-    database_url: str = "sqlite:///./malio.db"
+    database_url: str = "sqlite:////mnt/c/Users/m1916/Desktop/aimusic/AI_music-master/malio/malio.db"
     
     # Redis
     redis_url: str = "redis://localhost:6379/0"

@@ -155,14 +155,18 @@ a {
 }
 
 .top-bar-btn {
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
   border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--text-secondary);
   transition: all var(--ease);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 .top-bar-btn:hover {
@@ -526,20 +530,13 @@ a {
 .side-panel:not([hidden]) {
   visibility: visible;
   transform: translateX(0);
+  pointer-events: auto;
 }
 
-/* When side panel is open, ensure it's visible */
 .side-panel[hidden] {
-  display: flex !important;  /* override hidden for animation */
   visibility: hidden;
   transform: translateX(100%);
   pointer-events: none;
-}
-
-.side-panel.open {
-  visibility: visible;
-  transform: translateX(0);
-  pointer-events: auto;
 }
 
 .side-panel-header {
@@ -1166,11 +1163,11 @@ a {
 /* ===================================================================
    Player Hidden Mode — pure particle interface
    =================================================================== */
-body.player-hidden .player-area { display: none; }
-body.player-hidden .album-art-wrapper { display: none; }
-body.player-hidden .song-info { display: none; }
-body.player-hidden .progress-container { display: none; }
-body.player-hidden .player-controls { display: none; }
+body.player-hidden .player-area {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.35s ease;
+}
 body.player-hidden .volume-container { display: none; }
 
 /* ===================================================================
@@ -1239,3 +1236,4 @@ body.player-hidden .volume-container { display: none; }
     transition-duration: 0.01ms !important;
   }
 }
+
