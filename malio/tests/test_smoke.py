@@ -1,5 +1,5 @@
 """Smoke tests — core user flows must never break."""
-import sys, os
+import sys, os, asyncio
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
@@ -160,3 +160,105 @@ async def test_skip_weakens_preference():
     l3_profile.weaken("artists", "TestSkipArtist", "test skip")
     after = l3_profile.preferences.get("artists", {}).get("TestSkipArtist", {}).get("strength", 0.5)
     assert after < before, f"Preference should weaken: {before} → {after}"
+
+
+# ═══════════════════════════════════════════════════════════════
+# Bug-regression tests — added after backend audit 2026-05-18
+# ═══════════════════════════════════════════════════════════════
+
+def test_set_playlist_oob_index_clamped():
+    """set_playlist with out-of-bounds start_index → clamped, no crash."""
+    from core.state_manager import get_playback, set_playlist, next_in_queue
+
+    songs = [{"id": "a", "title": "A"}, {"id": "b", "title": "B"}]
+    uid = "test_oob"
+    # start_index beyond list length → should clamp to last valid index
+    set_playlist(songs, start_index=99, user_id=uid)
+    ps = get_playback(uid)
+    assert ps["index"] == 1  # clamped to len-1
+    assert ps["current"]["id"] == "b"
+    # next_in_queue should wrap correctly from clamped index
+    nxt = next_in_queue(uid)
+    assert nxt["id"] == "a"
+    assert ps["index"] == 0
+
+
+def test_set_playlist_empty_songs():
+    """set_playlist with empty list → no crash, empty state."""
+    from core.state_manager import get_playback, set_playlist
+
+    uid = "test_empty_pl"
+    set_playlist([], start_index=0, user_id=uid)
+    ps = get_playback(uid)
+    assert ps["playlist"] == []
+    assert ps["current"] == {}
+    assert ps["index"] == 0
+
+
+def test_set_playlist_zero_songs_index_clamped():
+    """set_playlist with 0 songs → start_index clamped to 0, no IndexError."""
+    from core.state_manager import get_playback, set_playlist
+
+    uid = "test_zero_pl"
+    set_playlist([], start_index=5, user_id=uid)
+    ps = get_playback(uid)
+    assert ps["index"] == 0
+    assert ps["current"] == {}
+
+
+@pytest.mark.anyio
+async def test_llm_auto_events_not_lost():
+    """Rapid push() calls → all events captured in queue, one reactor processes them."""
+    from agent.llm_autonomous import LLMAutonomous
+
+    class FakeFeedback:
+        def __init__(self):
+            self.snapshots = []
+        async def push_snapshot(self, **kw):
+            self.snapshots.append(kw)
+
+    class FakePersona:
+        energy = 0.5
+        warmth = 0.5
+        playfulness = 0.5
+
+    class FakeProvider:
+        def generate(self, prompt):
+            return '{"action":"breath","params":{"rate":0.015,"depth":0.5}}'
+
+    class FakeRegistry:
+        def get_active(self):
+            return FakeProvider()
+
+    auto = LLMAutonomous(FakeRegistry(), FakeFeedback(), FakePersona())
+    # Push 5 events rapidly
+    for i in range(5):
+        auto.push(f"test_{i}")
+    # All 5 should be in the queue
+    assert len(auto._queue) == 5
+    # Let the scheduled reactor task start
+    await asyncio.sleep(0)
+    # Only one reactor should be running
+    assert auto._busy is True
+    # Second push after busy should queue, not spawn another task
+    auto.push("test_5")
+    assert len(auto._queue) == 6  # all events preserved
+
+
+@pytest.mark.anyio
+async def test_persona_drift_triggers_save():
+    """drift_from_interaction → persona saved to disk within 60s debounce."""
+    import os, time
+    from agent.persona import persona_engine
+
+    save_path = persona_engine._path
+    # Reset debounce timer so save will fire
+    persona_engine._last_save_ts = 0
+    old_mtime = os.path.getmtime(save_path) if os.path.exists(save_path) else 0
+
+    persona_engine.drift_from_interaction("core_drag", {})
+    # Small sleep to let any filesystem ops settle
+    time.sleep(0.1)
+
+    new_mtime = os.path.getmtime(save_path) if os.path.exists(save_path) else 0
+    assert new_mtime >= old_mtime, "save() should be called after drift"

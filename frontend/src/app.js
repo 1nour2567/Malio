@@ -166,7 +166,6 @@ if (typeof engine !== 'undefined') {
     if (_swipeBusy) return;
     _swipeBusy = true;
     setTimeout(function () { _swipeBusy = false; }, 800);
-    if (wsClient) wsClient.sendCoreEvent('song_skip', { direction: dir });
     if (dir === 'right') {
       if (typeof nextSong === 'function') nextSong();
     } else {
@@ -523,6 +522,17 @@ function formatTime (sec) {
   return m + ':' + s.toString().padStart(2, '0');
 }
 
+function ewdToShape (energy, warmth, density) {
+  if (energy > 0.8 && density > 0.6) return 'swirl';         // intense + complex → psychedelic
+  if (energy > 0.75 && warmth > 0.6) return 'pulse_ring';    // warm banger
+  if (energy > 0.7) return 'star';                            // high energy
+  if (warmth > 0.7 && energy < 0.5) return 'drop';            // tender & low-energy → teardrop
+  if (warmth > 0.6) return 'bloom';                           // warm → petal/flower
+  if (density > 0.7) return 'hexagon';                        // complex/rich
+  if (density < 0.35) return 'circle';                        // minimal/sparse
+  return 'diamond';                                            // balanced pop
+}
+
 function setCurrentSong (song) {
   /* trigger DSL rules */
   if (particleRules) particleRules.triggerEvent('song_change');
@@ -593,6 +603,10 @@ function setCurrentSong (song) {
     state._ewdColor = ewColor;
     engine._coverSetAt = performance.now();
     engine.updateParams({ amplitude: Math.min(2.5, (engine.params.amplitude || 1) + 0.6) }, 0.06);
+    // Auto-morph core shape from E/W/D
+    if (typeof engine.setShape === 'function') {
+      engine.setShape(ewdToShape(ew, wm, dn));
+    }
     clearTimeout(state._colorTimer);
     state._colorTimer = setTimeout(function () {
       // Blend all sources, push to nebula too
@@ -633,7 +647,14 @@ function prevSong () {
   if (dom.audioPlayer) dom.audioPlayer.play().catch(function () {});
 }
 
+var _lastSkipTime = 0;
+
 function nextSong (skipSource) {
+  /* Debounce: ignore calls within 800ms to prevent ABA double-skip */
+  var now = performance.now();
+  if (now - _lastSkipTime < 800) return;
+  _lastSkipTime = now;
+
   /* advance locally immediately, backend syncs asynchronously */
   if (state.playlist.length > 0) {
     state.playlistIndex = (state.playlistIndex + 1) % state.playlist.length;
@@ -1579,12 +1600,15 @@ function _executeCoreAction (ca) {
     case 'set_mode':
       engine.setCoreMode(params.mode || 'dot');
       break;
+    case 'set_shape':
+      if (params.shape && typeof engine.setShape === 'function') engine.setShape(params.shape);
+      break;
     case 'light_burst':
       engine.triggerLightBurst(params.color);
       break;
     case 'move_core':
-      engine.core.x = params.x !== undefined ? params.x : engine.core.x;
-      engine.core.y = params.y !== undefined ? params.y : engine.core.y;
+      engine.core.x += (params.x || 0);
+      engine.core.y += (params.y || 0);
       engine._settled = false;
       engine._returning = true;
       break;

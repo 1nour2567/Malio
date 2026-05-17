@@ -33,6 +33,7 @@ from agent.persona import persona_engine
 from agent.pipeline import Pipeline, MusicResponse
 from agent.music_agent import MusicAgent
 from agent.visual_agent import VisualAgent
+from agent.llm_autonomous import LLMAutonomous
 
 # Load .env file
 load_dotenv()
@@ -43,19 +44,17 @@ import contextlib
 # App setup
 # ═══════════════════════════════════════════════════════════════
 
-@contextlib.asynccontextmanager
-async def lifespan(app):
-    asyncio.create_task(_atmosphere_loop())
-    asyncio.create_task(_distill_loop())
-    asyncio.create_task(_persist_loop())
-    yield
-
 app = FastAPI(
     title="Malio Music Agent API",
     description="AI music agent that provides personalized music recommendations",
-    version="0.3.0",
-    lifespan=lifespan
+    version="0.3.0"
 )
+
+@app.on_event("startup")
+async def _start_bg():
+    asyncio.create_task(_atmosphere_loop())
+    asyncio.create_task(_distill_loop())
+    asyncio.create_task(_persist_loop())
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -120,17 +119,20 @@ pipeline = Pipeline(perception, router, reasoner, provider_registry, tool_regist
                     scene_engine=scene_engine, music_agent=music_agent,
                     visual_agent=visual_agent)
 
+# ── LLM-driven autonomous behavior reactor ──
+llm_auto = LLMAutonomous(provider_registry, feedback_mgr, persona_engine)
+
 # ═══════════════════════════════════════════════════════════════
 # Background loops
 # ═══════════════════════════════════════════════════════════════
 
 async def _atmosphere_loop():
     while True:
-        await asyncio.sleep(30)
+        await asyncio.sleep(10)  # 10s for faster autonomous actions
         try:
             _atmosphere_loop._ticks = getattr(_atmosphere_loop, '_ticks', 0) + 1
             now = dt.datetime.now()
-            if _atmosphere_loop._ticks % 60 == 0:  # every 30 min
+            if _atmosphere_loop._ticks % 180 == 0:  # every 30 min (180×10s)
                 persona_engine.drift_natural(now.hour)
                 persona_engine.save()
             tod = "morning" if 5 <= now.hour < 12 else \
@@ -139,7 +141,7 @@ async def _atmosphere_loop():
             atm = persona_engine.derive_atmosphere(tod, now.hour)
 
             # ── Weather blend: fetch every 5 min, slow polling ──
-            if _atmosphere_loop._ticks % 10 == 0:  # every 5 min
+            if _atmosphere_loop._ticks % 30 == 0:  # every 5 min (30×10s)
                 try:
                     _atmosphere_loop._cached_weather = \
                         scene_engine.get_weather_context(24.9175, 118.6465) or {}
@@ -149,7 +151,7 @@ async def _atmosphere_loop():
             atm = persona_engine.blend_weather(atm, weather)
             await feedback_mgr.push_snapshot(atmosphere=atm)
 
-            # ── Autonomous behavior: Agent acts on its own ──
+            # ── Autonomous behavior: probability engine (fast) ──
             auto = persona_engine.maybe_autonomous_action()
             if auto:
                 await feedback_mgr.push_snapshot(core_action=auto)
@@ -157,6 +159,7 @@ async def _atmosphere_loop():
             print(f"[atmosphere-loop] {e}")
 
 _LAST_DISTILL = None
+
 async def _distill_loop():
     global _LAST_DISTILL
     while True:
@@ -346,7 +349,13 @@ class TTSRequest(BaseModel):
 @app.post("/api/chat", response_model=MusicResponse)
 async def chat_with_malio(request: UserInput):
     """Chat with Malio — delegates to 5-stage agent pipeline."""
-    return await pipeline.run(request)
+    result = await pipeline.run(request)
+    # Queue event for LLM autonomous reaction
+    is_music = any(kw in request.input.lower() for kw in
+                   ["推荐", "来一首", "听听", "放首歌", "放点", "播放", "想听"])
+    label = "推荐歌曲" if is_music else "聊天"
+    llm_auto.push(label, request.input[:80])
+    return result
 
 # ═══════════════════════════════════════════════════════════════
 # Routes — Recommendations
@@ -1114,14 +1123,12 @@ async def websocket_stream(websocket: WebSocket):
                     frontend_id = data.get("current_song_id", "")
                     backend_id = ps["current"].get("id", "")
                     if frontend_id and backend_id and frontend_id != backend_id:
-                        # Only re-sync if same mismatch persists 2 beats (60s)
                         _hb_key = f"mismatch_{uid}"
                         _hb_last = getattr(websocket_stream, '_hb_tracker', {})
                         prev = _hb_last.get(_hb_key, "")
                         cur = f"{frontend_id}_{backend_id}"
                         if prev == cur:
                             print(f"[ws] mismatch confirmed {uid}, re-syncing")
-                            # Only sync playlist + is_playing — don't force song change
                             await feedback_mgr.push_snapshot(
                                 playlist=ps["playlist"],
                                 is_playing=ps["is_playing"])
@@ -1129,6 +1136,10 @@ async def websocket_stream(websocket: WebSocket):
                         else:
                             _hb_last[_hb_key] = cur
                             print(f"[ws] mismatch pending {uid} frontend={frontend_id} backend={backend_id}")
+                        # Cap tracker to prevent unbounded growth
+                        if len(_hb_last) > 200:
+                            import time as _time
+                            _hb_last.clear()
                         websocket_stream._hb_tracker = _hb_last
 
                 elif action == "core_event":
@@ -1184,6 +1195,7 @@ async def websocket_stream(websocket: WebSocket):
 
                     persona_engine.drift_from_interaction(evt_type, evt.get("detail", {}))
                     await feedback_mgr.push_agent_log(f"感知到用户交互: {ws_label}")
+                    llm_auto.push(ws_label)
 
             except asyncio.TimeoutError:
                 await websocket.send_json({"type": "heartbeat"})

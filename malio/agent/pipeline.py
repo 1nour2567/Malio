@@ -287,6 +287,8 @@ class Pipeline:
             print(f"[rules] agent created: {rule.get('id')} — {rule.get('note', '')}")
 
         should_play = bool(recommendations) and reasoner_result.get("intent") in MUSIC_INTENTS
+        if should_play:
+            self.persona_engine.drift_from_recommendation()
         if recommendations:
             selected_id = reasoner_result.get("selected_song_id", "")
             if selected_id:

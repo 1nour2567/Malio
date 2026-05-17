@@ -48,6 +48,9 @@ malio/
 │   ├── tools.py            ← ToolRegistry 注册制
 │   ├── feedback.py         ← WebSocket 广播
 │   ├── providers.py        ← 多 LLM Provider 抽象
+│   ├── llm_autonomous.py   ← LLM 事件驱动自主行为
+│   ├── music_agent.py      ← 独立 MusicAgent (ReAct 选歌)
+│   ├── visual_agent.py     ← VisualAgent (规则引擎)
 │   └── perception.py       ← 环境感知 + 时间槽
 ├── core/
 │   ├── state_manager.py    ← 多用户状态 + JSON 持久化
@@ -314,11 +317,71 @@ cd ../frontend && npx vite --host   # 前端 :5173
   → 前端: 🎵 歌名 — 歌手 + DJ 文案
 ```
 
-### 下一步：VisualAgent
+### 当前状态
 
-```
-用户:"换成天空蓝"
-  → Router: 识别为 visual intent
-  → VisualAgent: 规则引擎直接设色，不需要 LLM
-  → 或者 LLM 根据用户描述生成 atmosphere+core_actions JSON
-```
+VisualAgent 已上线。多 Agent 架构全在生产中运行。
+
+---
+
+## 具身化系统（Embodiment）
+
+Malio 的内核不只是圆形光斑——它是一个能变形状、随音乐跳动、回应交互的视觉身体。
+
+### 内核形状（9 种）
+
+内核形状由 `_shapeRadius(shape, θ)` 极坐标函数定义，80 顶点采样，Canvas 2D 路径渲染。切歌时 E/W/D 自动映射，LLM 自主行为可 override。
+
+| 形状 | 触发 | 光环特征 |
+|------|------|---------|
+| `circle` | 低密度、睡眠 | 4px, 呼吸+涡旋 |
+| `star` | 高能 (E>0.7) | 2.5px 细, 强辉光 |
+| `heart` | 温暖 (W>0.65) | 5px 粗, 底部光池 |
+| `diamond` | 平衡流行 | 2px 极细, 锐利 |
+| `hexagon` | 复杂编曲 (D>0.7) | 3.5px, 顶点圆点 |
+| `pulse_ring` | 暖+炸舞曲 | 动态宽度 2-5px, 随节拍 |
+| `bloom` | 温暖 (W>0.6) | 双层花瓣叠影 |
+| `swirl` | 极端 (E>0.8, D>0.6) | 三臂螺旋+末梢拖尾弧 |
+| `drop` | 温柔 (W>0.7, E<0.5) | 水滴形, 底部光池最深 |
+
+形状间支持 **morph 过渡**（0.03/帧 lerp），切换平滑无跳变。
+
+### E/W/D → 形状自动映射
+
+`ewdToShape(energy, warmth, density)` — 切歌瞬间根据数据库中的歌曲 E/W/D 值决定内核形状，无需等 LLM。
+
+### 节拍脉冲
+
+`audio-analyzer.js` (Web Audio API) 实时提取 bass/mid/treble/beat → `particles.js` 每帧读取。
+- Beat 检测触发 `_coreExpand`（内核肿胀 15%，150ms 复位）
+- `beatFlash`：环亮度 1.5x 飙升，180ms 衰减
+- 效果：每次 kick drum 内核闪亮膨胀
+
+### 水波涟漪
+
+内核拖拽/回弹时，根据移动速度生成同心涟漪环：
+- 速度驱动生成（每 3 帧一个，最快 12 个并存）
+- 600ms 生命周期：半径从核心边缘向外扩张，透明度衰减
+- 双层（主环 + ghost 环 0.7x）增加水波深度感
+
+### 呼吸尺寸调制
+
+内核半径 `coreR *= (1 + 0.12 × breathDepth × sin(breathPhase))`。LLM 的 `breath` action 改 depth/rate 会同时影响光环亮度和内核尺寸，回弹落地时呼吸加深变快→内核明显"喘息"。
+
+### LLM 事件驱动自主行为
+
+`llm_autonomous.py` — 用户交互后 5s 防抖，LLM 看到事件上下文（含聊天文本内容）+ 时间 + persona 状态 → 生成一个 `core_action` JSON → WebSocket 广播 → 前端执行。
+
+`asyncio.to_thread()` 将 LLM 调用放入线程池，不阻塞事件循环。
+
+### core_action 类型
+
+| action | params | 说明 |
+|--------|--------|------|
+| `set_mode` | `mode: dot\|vortex` | 内核渲染模式 |
+| `set_shape` | `shape: circle\|star\|heart\|...` | 改变内核形状 |
+| `move_core` | `x, y` (相对偏移) | 移动内核位置 |
+| `set_size` | `radius: 10-80` | 改变内核大小 |
+| `breath` | `rate, depth` | 控制呼吸速率和深度 |
+| `set_color` | `color: #hex` | 改变内核颜色 |
+| `light_burst` | `color: #hex` | 光芒爆发（三层波纹） |
+

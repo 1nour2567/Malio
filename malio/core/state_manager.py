@@ -63,8 +63,8 @@ def _fast_skips_of(user_id: str = "default"):
 def set_playlist(songs: list, start_index: int = 0, user_id: str = "default"):
     ps = get_playback(user_id)
     ps["playlist"] = songs
-    ps["index"] = start_index
-    ps["current"] = songs[start_index] if (songs and start_index < len(songs)) else (songs[0] if songs else {})
+    ps["index"] = max(0, min(start_index, len(songs) - 1)) if songs else 0
+    ps["current"] = songs[ps["index"]] if songs else {}
     state_store.mark_dirty(user_id)
 
 

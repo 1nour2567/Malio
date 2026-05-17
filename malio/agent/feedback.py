@@ -2,6 +2,7 @@
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 from fastapi import WebSocket
+import asyncio
 import json
 import os
 
@@ -51,12 +52,15 @@ class Feedback:
     async def push_snapshot(self, **overrides):
         snapshot = self.build_snapshot(**overrides)
         dead: List[WebSocket] = []
-        for ws in self._connections:
+
+        async def _send_one(ws):
             try:
                 await ws.send_json(snapshot)
             except Exception as exc:
                 print(f"[feedback] send failed: {exc}")
                 dead.append(ws)
+
+        await asyncio.gather(*[_send_one(ws) for ws in self._connections], return_exceptions=True)
         for ws in dead:
             self.unregister(ws)
 
