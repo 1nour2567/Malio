@@ -112,10 +112,12 @@ class MatrixRain {
     this._colsFar = [];
     this._colsMid = [];
     this._colsNear = [];
-    this.core = { x: 0, y: 0, r: 40, active: true };
-    this._breathPhase = 0;  // breathing ring oscillation
-    this.params = { speed: 1.0, color: '#22C55E' };
-    this._targetParams = { ...this.params };
+    this.core = { x: 0, y: 0, r: 36, active: true };
+    this._breathPhase = 0;
+    this._breathRate = 0.016;   // Agent-controllable
+    this._breathDepth = 0.7;    // Agent-controllable
+    this.params = { speed: 3.8, color: '#22C55E' };
+    this._targetParams = { speed: 3.8, color: '#22C55E' };
     this._lerpFactor = 0.03;
     this._fadeAlpha = TRAIL_FADE;
     this._timeLevel = 0;          // current fade level 0-4
@@ -153,6 +155,9 @@ class MatrixRain {
     this.onCaptureComplete = null;  // callback for nebula capture → playlist
     /* audio reactivity */
     this._audio = { bass: 0, mid: 0, treble: 0, beat: 0 };
+    /* search mode */
+    this._searchMode = false;
+    this._searchInputLen = 0;
     /* core mode from Agent */
     this._coreMode = 'dot';  /* dot / vortex / helix / error */
     /* particle memory — interaction fingerprint */
@@ -174,6 +179,22 @@ class MatrixRain {
     let _swiping = false;
 
     const start = (e) => {
+      /* skip interactive elements — let their handlers work */
+      let el = e.target;
+      while (el && el !== document.body) {
+        const t = el.tagName;
+        if (t === 'BUTTON' || t === 'INPUT' || t === 'A' || t === 'SELECT' || t === 'TEXTAREA' || t === 'LABEL') {
+          _swiping = false; this._dragging = false; return;
+        }
+        if (el.classList && (el.classList.contains('side-panel') || el.classList.contains('playlist-card') || el.classList.contains('chat-messages') || el.classList.contains('search-results'))) {
+          _swiping = false; this._dragging = false; return;
+        }
+        if (el.id && (el.id.startsWith('btn-') || el.id.startsWith('ctrl-') || el.id.endsWith('-panel'))) {
+          _swiping = false; this._dragging = false; return;
+        }
+        el = el.parentElement;
+      }
+
       const pos = this._eventPos(e);
       const dx = pos.x - this.core.x;
       const dy = pos.y - this.core.y;
@@ -185,6 +206,7 @@ class MatrixRain {
         if (now - this._lastTap < 400) {
           clearTimeout(_pressTimer);
           if (this._summonActive) this.endSummon();
+          if (this._searchMode) this.endSearch();
           this._dragging = false;
           this.canvas.style.cursor = '';
           this._timeWarp = !this._timeWarp;
@@ -215,8 +237,11 @@ class MatrixRain {
         const sx = _pressStartX, sy = _pressStartY;
         _pressTimer = setTimeout(() => {
           const dx2 = this.core.x - sx, dy2 = this.core.y - sy;
-          if (Math.abs(dx2) + Math.abs(dy2) < 10) {
-            this.startSummon();
+          const moved = Math.abs(dx2) + Math.abs(dy2);
+          if (moved < 10) {
+            this.startSearch();  /* held still → search */
+          } else {
+            this.startSummon(); /* dragged → nebula capture */
           }
         }, 600);
         this._dragging = true;
@@ -237,6 +262,7 @@ class MatrixRain {
     let _dragPrevX = 0, _dragPrevY = 0;
     let _swipeAccDx = 0, _swipeAccDy = 0;
     const move = (e) => {
+      if (!_swiping && !this._dragging) return;
       const pos = this._eventPos(e);
 
       /* track swipe delta — fire immediately on threshold */
@@ -319,6 +345,7 @@ class MatrixRain {
       }
     };
     const end = (e) => {
+      if (!_swiping && !this._dragging) return;
       clearTimeout(_pressTimer);
       if (this._summonActive) this.endSummon();
 
@@ -391,11 +418,24 @@ class MatrixRain {
     this._audio.beat = data.beat;
   }
 
+  setBreath (rate, depth) {
+    if (rate !== undefined) this._breathRate = rate;
+    if (depth !== undefined) this._breathDepth = depth;
+  }
+
   setCoreMode (mode) {
     if (this._coreMode !== mode) {
       this._coreMode = mode;
-      if (mode === 'error') this._coreModeStart = performance.now();
-      if (mode === 'vortex') this._coreModeStart = performance.now();
+      this._coreModeStart = performance.now();
+    }
+    // Keep vortex visible at least 2s even if dot is pushed
+    if (mode === 'vortex') {
+      this._coreModeStart = performance.now();
+    }
+    if (mode === 'dot' && this._coreModeStart && performance.now() - this._coreModeStart < 2000) {
+      // Don't exit vortex yet — let it play out
+      this._coreMode = 'vortex';
+      this._pendingDot = true;
     }
   }
 
@@ -500,7 +540,7 @@ class MatrixRain {
         { delay: 240, speed: 180, duration: 300, maxR: 200, ampNear: 12, ampFar: 2.5, cycle: 170, alphaDrop: 0.85, stretch: 0 },
       ]
     };
-    this._coreExpand = now; // trigger core expansion
+    this._coreExpand = performance.now();
   }
 
   triggerSwipeRipple (dir) {
@@ -577,6 +617,30 @@ class MatrixRain {
     }
   }
 
+  /* ── Search mode ──────────────────────────────────────── */
+
+  startSearch () {
+    this._searchMode = true;
+    this._searchInputLen = 0;
+    if (this._summonActive) this.endSummon();
+    if (typeof this.onSearchStart === 'function') this.onSearchStart();
+  }
+
+  endSearch () {
+    this._searchMode = false;
+    this._searchInputLen = 0;
+    if (typeof this.onSearchEnd === 'function') this.onSearchEnd();
+  }
+
+  updateSearchInput (len) {
+    this._searchInputLen = Math.max(0, len);
+  }
+
+  triggerSearchCollapse () {
+    this._searchMode = false;
+    if (typeof this.onSearchCollapse === 'function') this.onSearchCollapse();
+  }
+
   _resize () {
     this.canvas.width = window.innerWidth;
     this.canvas.height = window.innerHeight;
@@ -641,6 +705,29 @@ class MatrixRain {
     if (this._targetParams.speed !== this.params.speed) {
       this.params.speed += (this._targetParams.speed - this.params.speed) * this._lerpFactor;
     }
+
+    // Smooth color lerp — fast, toward _targetParams.color
+    const targetColor = this._targetParams.color || '#22C55E';
+    if (!this.params.color) this.params.color = targetColor;
+    const tcDiff = this.params.color !== targetColor;
+    if (tcDiff) {
+      const tr = parseInt(targetColor.slice(1, 3), 16), tg = parseInt(targetColor.slice(3, 5), 16), tb = parseInt(targetColor.slice(5, 7), 16);
+      const cr = parseInt(this.params.color.slice(1, 3), 16), cg = parseInt(this.params.color.slice(3, 5), 16), cb = parseInt(this.params.color.slice(5, 7), 16);
+      const f = Math.min(1, this._lerpFactor);
+      const nr = Math.round(cr + (tr - cr) * f);
+      const ng = Math.round(cg + (tg - cg) * f);
+      const nb = Math.round(cb + (tb - cb) * f);
+      const next = '#' + nr.toString(16).padStart(2, '0') + ng.toString(16).padStart(2, '0') + nb.toString(16).padStart(2, '0');
+      // Snap if close
+      const dist = Math.abs(tr - nr) + Math.abs(tg - ng) + Math.abs(tb - nb);
+      this.params.color = dist < 15 ? targetColor : next;
+    }
+
+    // Use lerped color for particle + core rendering
+    const tc = this.params.color || targetColor;
+    const _rr = parseInt(tc.replace('#', '').substring(0, 2), 16);
+    const _gg = parseInt(tc.replace('#', '').substring(2, 4), 16);
+    const _bb = parseInt(tc.replace('#', '').substring(4, 6), 16);
 
     // Emotional return physics — core drifts back to home after drag
     if (this._returning && !this._dragging) {
@@ -945,18 +1032,21 @@ class MatrixRain {
           const dx = drawX - this.core.x;
           const dy = c.y - this.core.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist < this.core.r && dist > 2) {
-            const t = dist / this.core.r;
+          const effR = this._effectiveCoreR || this.core.r;
+          if (dist < effR && dist > 2) {
+            const t = dist / effR;
+            /* search brownian: add random jitter near core */
+            if (this._searchMode && this._searchInputLen > 0) {
+              const bf = 0.3 + this._searchInputLen * 0.1;
+              c.vx = (c.vx || 0) + (Math.random() - 0.5) * bf;
+              c.vy = (c.vy || 0) + (Math.random() - 0.5) * bf;
+            }
             const strength = t * (1 - t) * 24;
             drawX -= (dx / dist) * strength;
             drawY -= (dy / dist) * strength;
             lensScale = 1 + (1 - t) * 0.5; // 1.5x at center, 1x at edge
           }
         }
-
-        // Particle memory: veteran particles slightly larger
-        const memScale = 1 + Math.min(0.3, (c.mem || 0) * 0.01);
-        lensScale *= memScale;
 
         // Capture target scaling: particle grows as core approaches
         if (c._captureScale && c._captureScale > 1) {
@@ -977,9 +1067,9 @@ class MatrixRain {
           g = Math.round(c._rgb.g * bright);
           b = Math.round(c._rgb.b * bright);
         } else {
-          r = Math.round(0x22 * bright);
-          g = Math.round(0xC5 * bright);
-          b = Math.round(0x5E * bright);
+          r = Math.round(_rr * bright);
+          g = Math.round(_gg * bright);
+          b = Math.round(_bb * bright);
         }
         ctx.fillStyle = 'rgb(' + r + ',' + g + ',' + b + ')';
         ctx.globalAlpha = c._walpha || 1;
@@ -1023,7 +1113,7 @@ class MatrixRain {
         }
       }
       if (frozen.length > 2 && typeof NebulaEngine !== 'undefined') {
-        this._nebula = new NebulaEngine(this.canvas, this.ctx);
+        this._nebula = new NebulaEngine(this.canvas, this.ctx, this);
         this._nebula.enter(frozen);
       }
     }
@@ -1035,8 +1125,21 @@ class MatrixRain {
 
     // Core lens — nearly invisible, perceived only through refraction
     if (this.core.active) {
-      const cx = this.core.x, cy = this.core.y, cr = this.core.r;
+      /* search mode: core shrinks to 20 over 0.3s */
+      let coreR = this.core.r;
+      if (this._searchMode) {
+        const targetR = 20;
+        coreR += (targetR - coreR) * 0.12;
+      }
+      this._effectiveCoreR = coreR;
+      const cx = this.core.x, cy = this.core.y, cr = coreR;
       const mode = this._coreMode;
+
+      // Release pending dot after minimum vortex duration (2s)
+      if (this._pendingDot && this._coreModeStart && performance.now() - this._coreModeStart > 2000) {
+        this._coreMode = 'dot';
+        this._pendingDot = false;
+      }
 
       /* ── vortex mode: spinning ring particles ────────── */
       if (mode === 'vortex' && !this._timeWarp) {
@@ -1051,18 +1154,53 @@ class MatrixRain {
         }
       }
 
-      /* ── error mode: red flicker + fade ──────────────── */
+      /* ── error mode: red flicker → brownian → pulse heal ── */
       if (mode === 'error') {
         const sinceError = performance.now() - (this._coreModeStart || 0);
-        const flicker = Math.abs(Math.sin(sinceError / 80)) * (sinceError < 1200 ? 1 : Math.max(0, 1 - (sinceError - 1200) / 2000));
-        ctx.fillStyle = `rgba(255, 0, 0, ${flicker * 0.4})`;
-        ctx.beginPath();
-        ctx.arc(cx, cy, cr + 12, 0, Math.PI * 2);
-        ctx.fill();
+        /* phase 1: flicker (0-900ms) */
+        if (sinceError < 900) {
+          const flicker = Math.abs(Math.sin(sinceError / 75)) * 0.7;
+          ctx.fillStyle = `rgba(255, ${flicker > 0.3 ? 0 : 255}, ${flicker > 0.3 ? 0 : 255}, ${flicker})`;
+          ctx.beginPath();
+          ctx.arc(cx, cy, cr + 14, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        /* phase 2: dim red dot + brownian (900-4000ms) */
+        if (sinceError >= 900 && sinceError < 4000) {
+          ctx.fillStyle = 'rgba(255, 40, 40, 0.3)';
+          ctx.beginPath();
+          ctx.arc(cx, cy, cr * 0.6, 0, Math.PI * 2);
+          ctx.fill();
+          /* brownian on nearby particles */
+          for (const layer of [this._colsFar, this._colsMid, this._colsNear]) {
+            for (const col of layer) {
+              for (const c of col.stream) {
+                const d = Math.sqrt((c.x - cx) ** 2 + (c.y - cy) ** 2);
+                if (d < 200) {
+                  c.vx = (c.vx || 0) + (Math.random() - 0.5) * 0.6;
+                  c.vy = (c.vy || 0) + (Math.random() - 0.5) * 0.6;
+                }
+              }
+            }
+          }
+        }
+        /* phase 3: pulse recovery (4000-5500ms) */
+        if (sinceError >= 4000 && sinceError < 5500) {
+          const pulseT = (sinceError - 4000) / 1500;
+          const pulse = Math.sin(pulseT * Math.PI * 3) * 0.5 + 0.5;
+          ctx.fillStyle = `rgba(34, 197, 94, ${pulse * 0.4})`;
+          ctx.beginPath();
+          ctx.arc(cx, cy, cr + 8 * pulse, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        /* after 5500ms → auto-recover */
+        if (sinceError > 5500) {
+          this.setCoreMode('dot');
+        }
       }
 
       // Ring: dashed during summon, breathing otherwise
-      this._breathPhase += this._summonActive ? 0.08 : 0.016;
+      this._breathPhase += this._summonActive ? 0.08 : this._breathRate;
       if (this._summonActive) {
         ctx.setLineDash([8, 12]);
         ctx.lineDashOffset = -this._breathPhase * 20;
@@ -1075,13 +1213,9 @@ class MatrixRain {
         ctx.setLineDash([]);
         ctx.lineWidth = 1;
       }
-      const breathBase = this._timeWarp ? 0.3 : (0.3 + 0.7 * Math.sin(this._breathPhase));
+      const breathBase = this._timeWarp ? 0.3 : (0.3 + this._breathDepth * Math.sin(this._breathPhase));
       let breath = breathBase;
-      const tc = this._targetParams.color || '#22C55E';
-      const hex = tc.replace('#', '');
-      const rr = parseInt(hex.substring(0, 2), 16);
-      const gg = parseInt(hex.substring(2, 4), 16);
-      const bb = parseInt(hex.substring(4, 6), 16);
+      const rr = _rr, gg = _gg, bb = _bb;
 
       // Grab flash: brightness spike on initial grab, then decay
       const now = performance.now();
@@ -1154,11 +1288,11 @@ class MatrixRain {
         ctx.fill();
       }
 
-      // Lens gradient fill
+      // Lens gradient fill — use atmosphere color, not hardcoded green
       const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, cr);
-      grad.addColorStop(0, 'rgba(34,197,94,0.04)');
-      grad.addColorStop(0.15, 'rgba(34,197,94,0.01)');
-      grad.addColorStop(1, 'rgba(34,197,94,0)');
+      grad.addColorStop(0, `rgba(${rr},${gg},${bb},0.04)`);
+      grad.addColorStop(0.15, `rgba(${rr},${gg},${bb},0.01)`);
+      grad.addColorStop(1, `rgba(${rr},${gg},${bb},0)`);
       ctx.fillStyle = grad;
       ctx.beginPath();
       ctx.arc(cx, cy, cr, 0, Math.PI * 2);

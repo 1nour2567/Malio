@@ -23,9 +23,10 @@ const NEBULA_RING_PULL = 0.0003;    // weak pull toward orbital ring target
 
 class NebulaEngine {
 
-  constructor (canvas, ctx) {
+  constructor (canvas, ctx, engine) {
     this.canvas = canvas;
     this.ctx = ctx;
+    this.engine = engine || null;
     this.active = false;
     this.particles = [];        // {x, y, char, energy, warmth, density, vx, vy, title}
     this._lastFrame = null;
@@ -197,7 +198,11 @@ class NebulaEngine {
         const b = Math.round(p._rgb.b * bright);
         ctx.fillStyle = 'rgb(' + r + ',' + g + ',' + b + ')';
       } else {
-        ctx.fillStyle = '#22C55E';
+        // Follow engine's current color instead of hardcoded green
+        var ec = (this.engine && this.engine._targetParams && this.engine._targetParams.color)
+                 || (this.engine && this.engine.params && this.engine.params.color)
+                 || '#22C55E';
+        ctx.fillStyle = ec;
       }
       ctx.font = '15px "JetBrains Mono", monospace';
       ctx.globalAlpha = 0.9;

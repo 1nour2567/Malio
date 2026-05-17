@@ -5,6 +5,8 @@
    ================================================================ */
 
 const WS_RECONNECT_DELAY = 3000;
+const WS_QUEUE_MAX = 100;
+const WS_QUEUE_TTL_MS = 30000;
 
 class WSClient {
   constructor (url) {
@@ -12,6 +14,7 @@ class WSClient {
     this.ws = null;
     this._reconnectTimer = null;
     this._destroyed = false;
+    this._pendingQueue = [];  /* messages queued before connection opens */
 
     /* ── callbacks (set by consumer) ──────────────────────── */
     this.onSnapshot = null;
@@ -30,8 +33,12 @@ class WSClient {
     if (this._destroyed) return;
 
     try {
+      // Bypass Vite proxy (bug: connects but drops messages).
+      // In dev: direct to backend port 8007. In prod: relative to page origin.
+      const isDev = location.port === '5173';
+      const wsHost = isDev ? 'localhost:8007' : location.host;
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = protocol + '//' + location.host + this.url;
+      const wsUrl = protocol + '//' + wsHost + this.url;
       this.ws = new WebSocket(wsUrl);
     } catch (err) {
       console.warn('[WSClient] Connection error:', err);
@@ -42,6 +49,21 @@ class WSClient {
     this.ws.onopen = () => {
       /* send an initial get_state to sync */
       this.getState();
+      /* drain pending queue — drop expired messages */
+      var now = Date.now();
+      var valid = [];
+      for (var i = 0; i < this._pendingQueue.length; i++) {
+        var msg = this._pendingQueue[i];
+        if (msg._ts && now - msg._ts < WS_QUEUE_TTL_MS) {
+          valid.push(msg);
+        }
+      }
+      for (var j = 0; j < valid.length; j++) {
+        var m = valid[j];
+        delete m._ts;
+        try { this.ws.send(JSON.stringify(m)); } catch (_) {}
+      }
+      this._pendingQueue = [];
     };
 
     this.ws.onmessage = (event) => {
@@ -95,7 +117,7 @@ class WSClient {
 
       case 'rule':
         if (typeof this.onRule === 'function') {
-          this.onRule(data);
+          this.onRule(data.rule || data);
         }
         break;
 
@@ -125,15 +147,29 @@ class WSClient {
   getState () {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     try {
-      this.ws.send(JSON.stringify({ action: 'get_state' }));
+      var uid = localStorage.getItem('malio_user_id') || 'default';
+      this.ws.send(JSON.stringify({ action: 'get_state', user_id: uid }));
     } catch (_) { /* ignore */ }
   }
 
   sendCoreEvent (type, detail) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     try {
-      this.ws.send(JSON.stringify({ action: 'core_event', event: { type: type, detail: detail, ts: Date.now() } }));
+      var uid = localStorage.getItem('malio_user_id') || 'default';
+      this.ws.send(JSON.stringify({ action: 'core_event', user_id: uid, event: { type: type, detail: detail, ts: Date.now() } }));
     } catch (_) { /* ignore */ }
+  }
+
+  sendGuaranteed (msg) {
+    /* Send now if connected; queue with TTL otherwise */
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      try { this.ws.send(JSON.stringify(msg)); } catch (_) {}
+    } else {
+      if (this._pendingQueue.length < WS_QUEUE_MAX) {
+        msg._ts = Date.now();
+        this._pendingQueue.push(msg);
+      }
+    }
   }
 
   /* ═══════════════════════════════════════════════════════════

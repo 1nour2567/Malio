@@ -41,3 +41,13 @@ frontend/dist/
 
 # Local env files
 malio/.env
+data/audio/songs/*.mp3
+data/audio/songs/*.flac
+data/sessions/*.json
+data/history/*.jsonl
+data/metrics.csv
+data/user_profile.json
+data/agent_persona.json
+__pycache__/
+*.pyc
+venv/

@@ -143,8 +143,9 @@ class RecommendationEngine:
                 score = self.calculate_song_score(song.id, user_id, context)
                 song_scores.append((song, score))
 
-            # Sort songs by score
-            song_scores.sort(key=lambda x: x[1], reverse=True)
+            # Sort songs by score + random jitter to avoid same-order repeats
+            import random
+            song_scores.sort(key=lambda x: x[1] + random.random() * 0.01, reverse=True)
 
             # Get top recommendations
             recommendations = []
