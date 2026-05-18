@@ -147,13 +147,18 @@ async def _atmosphere_loop():
                         scene_engine.get_weather_context(24.9175, 118.6465) or {}
                 except Exception:
                     _atmosphere_loop._cached_weather = getattr(_atmosphere_loop, '_cached_weather', {})
-                # Rule lifecycle: VisualAgent manages rules against persona+weather
+                # Rule lifecycle
                 try:
                     result = await visual_agent._manage_rules(_atmosphere_loop._cached_weather or {})
                     if result.get("changes"):
                         print(f"[visual-agent] rules managed: {result['changes']}")
                 except Exception as e:
                     print(f"[visual-agent] rule manage error: {e}")
+                # Proactive speech: LLM may speak unprompted
+                try:
+                    await llm_auto.maybe_speak()
+                except Exception as e:
+                    print(f"[llm-auto] speak error: {e}")
             weather = getattr(_atmosphere_loop, '_cached_weather', {})
             atm = persona_engine.blend_weather(atm, weather)
             await feedback_mgr.push_snapshot(atmosphere=atm, weather=weather if weather else None)
@@ -295,6 +300,7 @@ class PlaylistSongRequest(BaseModel):
 class PlaylistGenerateRequest(BaseModel):
     captured_songs: List[Dict[str, Any]]
     hour: Optional[int] = None
+    name: Optional[str] = None
 
 class SpotifySearchRequest(BaseModel):
     query: str
@@ -994,39 +1000,48 @@ async def generate_playlist_from_capture(body: PlaylistGenerateRequest):
         from datetime import datetime, timezone
         captured = body.captured_songs
         if not captured: raise HTTPException(status_code=400, detail="No captured songs provided")
-        energies = [s.get("energy",0.5) for s in captured if s.get("energy") is not None] or [0.5]
-        warmths = [s.get("warmth",0.5) for s in captured if s.get("warmth") is not None] or [0.5]
-        densities = [s.get("density",0.5) for s in captured if s.get("density") is not None] or [0.5]
-        centroid = {"energy":round(sum(energies)/len(energies),4),"warmth":round(sum(warmths)/len(warmths),4),"density":round(sum(densities)/len(densities),4)}
-        all_songs = session.query(Song).filter(Song.energy.isnot(None),Song.warmth.isnot(None),Song.density.isnot(None)).all()
-        scored = []
-        for song in all_songs:
-            dist = _ewd_distance({"energy":song.energy,"warmth":song.warmth,"density":song.density}, centroid)
-            if dist<0.25: scored.append((dist,song))
-        scored.sort(key=lambda x:x[0]); top_matches = scored[:20]
-        seed_titles = [s.get("title","") for s in captured if s.get("title")]
-        e_desc = "高能" if centroid["energy"]>0.65 else ("低能" if centroid["energy"]<0.35 else "中能")
-        w_desc = "暖调" if centroid["warmth"]>0.6 else ("冷调" if centroid["warmth"]<0.4 else "中性")
-        d_desc = "浓密" if centroid["density"]>0.7 else ("极简" if centroid["density"]<0.3 else "适密")
+        # Use captured songs directly — no similarity search
+        deduped = {}
+        for s in captured:
+            sid = s.get("song_id") or s.get("id")
+            if sid and sid not in deduped:
+                deduped[sid] = s
+        songs_in = list(deduped.values())
+        # Look up each captured song in DB for full metadata
+        matched = []
+        for s in songs_in:
+            sid = s.get("song_id") or s.get("id")
+            db_song = session.query(Song).filter_by(id=sid).first()
+            if db_song:
+                matched.append(db_song)
+            else:
+                matched.append(s)  # keep raw data if DB miss
+        seed_titles = [s.get("title","") if isinstance(s, dict) else s.title for s in songs_in[:5]]
         try:
-            song_context = [{"title":s.get("title",""),"artist":""} for s in captured[:3]]
-            playlist_name = kimi_integration.generate_playlist_name(song_context, {"energy_desc":f"{e_desc}{w_desc}{d_desc}","seed":seed_titles})
+            song_context = [{"title": t, "artist": ""} for t in seed_titles if t]
+            playlist_name = kimi_integration.generate_playlist_name(song_context, {"energy_desc":"捕获歌单","seed":seed_titles})
         except Exception:
-            playlist_name = f"{e_desc}{w_desc}{d_desc} · {seed_titles[0] if seed_titles else '未命名'}"
+            playlist_name = f"星云捕获 · {seed_titles[0] if seed_titles else '未命名'}"
+        # User override from confirm bar
+        if getattr(body, 'name', None) and body.name.strip():
+            playlist_name = body.name.strip()
         pl_id = str(uuid.uuid4())[:8]
-        ctx = {"type":"capture","energy_center":centroid["energy"],"warmth_center":centroid["warmth"],"density_center":centroid["density"],
-               "seed_song_ids":[s.get("id") for s in captured],"captured_at":datetime.now(timezone.utc).isoformat()}
-        if top_matches:
-            ctx["energy_range"] = [round(min(s.energy for _,s in top_matches),4), round(max(s.energy for _,s in top_matches),4)]
-            ctx["warmth_range"] = [round(min(s.warmth for _,s in top_matches),4), round(max(s.warmth for _,s in top_matches),4)]
-            ctx["density_range"] = [round(min(s.density for _,s in top_matches),4), round(max(s.density for _,s in top_matches),4)]
-        playlist = Playlist(id=pl_id, name=playlist_name, description=f"星云捕获 · {e_desc}{w_desc}{d_desc}",
+        ctx = {"type":"capture","captured_count":len(songs_in),
+               "captured_at":datetime.now(timezone.utc).isoformat()}
+        playlist = Playlist(id=pl_id, name=playlist_name, description=f"星云捕获 · {len(matched)}首",
                             created_at=datetime.now(timezone.utc), context=ctx)
         session.add(playlist)
-        for i,(dist,song) in enumerate(top_matches): session.add(PlaylistSong(playlist_id=pl_id,song_id=song.id,position=i))
+        for i, song in enumerate(matched):
+            sid = song.id if hasattr(song, 'id') else song.get("id", f"cap_{i}")
+            session.add(PlaylistSong(playlist_id=pl_id, song_id=sid, position=i))
         session.commit()
-        songs_out = [{"id":s.id,"title":s.title,"artist":s.artist,"energy":s.energy,"warmth":s.warmth,"density":s.density} for _,s in top_matches]
-        return {"playlist_name":playlist_name,"playlist_id":pl_id,"centroid":centroid,"songs":songs_out,"total":len(songs_out)}
+        songs_out = []
+        for s in matched:
+            if hasattr(s, 'id'):
+                songs_out.append({"id":s.id,"title":s.title,"artist":s.artist,"energy":s.energy,"warmth":s.warmth,"density":s.density})
+            else:
+                songs_out.append({"id":s.get("id",""),"title":s.get("title","?"),"artist":s.get("artist",[])})
+        return {"playlist_name":playlist_name,"playlist_id":pl_id,"songs":songs_out,"total":len(songs_out)}
     except HTTPException: raise
     except Exception as e: session.rollback(); raise HTTPException(status_code=500, detail=str(e))
     finally: session.close()
@@ -1063,6 +1078,60 @@ async def remove_song_from_playlist(playlist_id: str, song_id: str):
     except HTTPException: raise
     except Exception as e: session.rollback(); raise HTTPException(status_code=500, detail=str(e))
     finally: session.close()
+
+# ═══════════════════════════════════════════════════════════════
+# Federated rule exchange
+# ═══════════════════════════════════════════════════════════════
+
+@app.get("/api/rules/export")
+async def export_rules():
+    """Export all rules with quality metadata, anonymized for federation."""
+    from core.state_manager import get_agent_rules
+    rules = get_agent_rules()
+    export = []
+    for r in rules:
+        export.append({
+            "id": r.get("id", ""),
+            "when": r.get("when"),
+            "then": r.get("then"),
+            "priority": r.get("priority", 0),
+            "_hits": r.get("_hits", 0),
+            "_score": r.get("_score"),
+            "_created_by": r.get("_created_by", ""),
+            "_created_reason": r.get("_created_reason", ""),
+            "_created_at": r.get("_created_at", ""),
+            "_source": r.get("_source", "local"),
+        })
+    return {"rules": export, "count": len(export), "exported_at": dt.datetime.now().isoformat()}
+
+@app.post("/api/rules/import")
+async def import_rules(body: dict):
+    """Import federated rules. Deduplicate, score-down foreign rules for observation."""
+    from core.state_manager import get_agent_rules, state_store
+    incoming = body.get("rules", [])
+    if not incoming:
+        return {"imported": 0, "duplicates": 0}
+    existing = get_agent_rules()
+    existing_conds = set()
+    for r in existing:
+        w = json.dumps(r.get("when", {}), sort_keys=True)
+        existing_conds.add(w)
+
+    imported, dupes = 0, 0
+    for r in incoming:
+        w = json.dumps(r.get("when", {}), sort_keys=True)
+        if w in existing_conds:
+            dupes += 1
+            continue
+        r["_source"] = "federated"
+        r["_score"] = (r.get("_score", 0.5) or 0.5) * 0.7  # observation period
+        r["_active"] = True
+        r["_imported_at"] = dt.datetime.now().isoformat()
+        existing.append(r)
+        imported += 1
+
+    state_store.mark_dirty("default")
+    return {"imported": imported, "duplicates": dupes}
 
 # ═══════════════════════════════════════════════════════════════
 # Dev — inject weather for testing

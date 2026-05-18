@@ -303,8 +303,8 @@ class Pipeline:
                 current = get_playback(self._current_user_id)["current"]
                 response_text = f"🎵 {current.get('title','')} — {', '.join(current.get('artist',[]))}\n\n{response_text}"
 
-        # Use LLM atmosphere if present, otherwise derive from persona
-        llm_atm = reasoner_result.get("atmosphere")
+        # Atmosphere always derived from persona — VisualAgent jurisdiction
+        llm_atm = reasoner_result.get("atmosphere") if reasoner_result.get("atmosphere") and reasoner_result["atmosphere"] != None else None
         if not llm_atm:
             from datetime import datetime
             now = datetime.now()

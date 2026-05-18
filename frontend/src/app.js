@@ -131,6 +131,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initIdleTimer();
   injectSongLibrary();
   loadSongList();  // preload for library panel
+  loadCorridor();  // load playlists + scene section
 
   /* ── 30s heartbeat: state consistency check ────────────────── */
   setInterval(function () {
@@ -223,22 +224,31 @@ if (typeof engine !== 'undefined') {
   engine.onCaptureComplete = function (capturedSongs) {
     if (!capturedSongs || !capturedSongs.length) return;
     if (wsClient) wsClient.sendCoreEvent('nebula_capture', { count: capturedSongs.length });
-    // Auto-generate playlist without blocking confirm()
+    // Show confirm bar before generating playlist
     var names = capturedSongs.map(function(s) { return s.title || '?' ; }).slice(0, 3).join('、');
     if (capturedSongs.length > 3) names += '等' + capturedSongs.length + '首';
-    showToast('✨ 捕获 ' + names + '，正在生成歌单...');
-    fetch('/api/playlists/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ captured_songs: capturedSongs })
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (data.playlist_name) {
-        showToast('歌单「' + data.playlist_name + '」已生成（' + data.total + ' 首）');
-      }
-    })
-    .catch(function(err) { console.error('Capture error:', err); showToast('歌单生成失败，请重试'); });
+    var defaultName = '星云捕获 · ' + (capturedSongs[0] ? (capturedSongs[0].title || '未命名') : '未命名');
+    state._pendingCapture = capturedSongs;
+    showConfirmBar('✨ 捕获 ' + names + '，要创建歌单吗？', function (playlistName) {
+      var songs = state._pendingCapture;
+      state._pendingCapture = null;
+      var name = playlistName || defaultName;
+      fetch('/api/playlists/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ captured_songs: songs, name: name })
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.playlist_name) {
+          showToast('歌单「' + data.playlist_name + '」已生成（' + data.total + ' 首）');
+          loadCorridor(); // refresh playlist panel
+        }
+      })
+      .catch(function(err) { console.error('Capture error:', err); showToast('歌单生成失败，请重试'); });
+    }, function () {
+      state._pendingCapture = null; // cancelled
+    });
   };
 
   // Reverse embodiment: core drag release → music zone intent
@@ -1328,9 +1338,10 @@ function renderUserPlaylists (playlists) {
     return;
   }
   for (var i = 0; i < playlists.length; i++) {
-    var pl = playlists[i];
+    let pl = playlists[i];
     var card = document.createElement('div');
     card.className = 'playlist-card';
+    card.style.position = 'relative';
     card.innerHTML =
       '<div class="card-dots">' + buildColorDots(pl.color_dots || []) + '</div>' +
       '<div class="card-info">' +
@@ -1338,7 +1349,18 @@ function renderUserPlaylists (playlists) {
         '<div class="card-meta">' + (pl.song_count || 0) + ' 首</div>' +
       '</div>' +
       '<span class="card-arrow">▸</span>';
+    card._plId = pl.id;
+    // Long-press (3s) to delete playlist
+    var _holdTimer = null, _holdFired = false;
+    var startHold = function () { _holdFired = false; _holdTimer = setTimeout(function () { _holdFired = true; deletePlaylist(pl.id, pl.name, card); }, 3000); };
+    var cancelHold = function () { clearTimeout(_holdTimer); };
+    card.addEventListener('mousedown', startHold);
+    card.addEventListener('mouseup', cancelHold);
+    // Don't cancel on mouseleave — tiny movements during 3s hold break it
+    card.addEventListener('touchstart', startHold);
+    card.addEventListener('touchend', cancelHold);
     card.addEventListener('click', function (plId, el) {
+      if (_holdFired) { _holdFired = false; return; }  // long-press triggered, skip click
       return function () {
         var list = el.nextElementSibling;
         if (list && list.classList.contains('playlist-songs')) {
@@ -1346,12 +1368,10 @@ function renderUserPlaylists (playlists) {
           el.querySelector('.card-arrow').textContent = list.hidden ? '▸' : '▾';
         }
         if (!list || list.hidden) return;
-        // Fetch playlist detail if not loaded
         if (!list._loaded) {
           list._loaded = true;
           fetch('/api/playlists/' + plId).then(function (r) { return r.json(); }).then(function (d) {
-            // Use appendChild to preserve event listeners (innerHTML strips them)
-            var songEl = buildSongExpandList(d.songs || []);
+            var songEl = buildSongExpandList(d.songs || [], plId);
             while (list.firstChild) list.removeChild(list.firstChild);
             while (songEl.firstChild) list.appendChild(songEl.firstChild);
           });
@@ -1402,7 +1422,7 @@ function hslToRgb (h, s, l) {
   };
 }
 
-function buildSongExpandList (songs) {
+function buildSongExpandList (songs, plId) {
   var div = document.createElement('div');
   if (!songs || !songs.length) {
     div.innerHTML = '<div class="playlist-song-item" style="opacity:0.5">暂无歌曲</div>';
@@ -1421,12 +1441,13 @@ function buildSongExpandList (songs) {
     }
     html += '<div class="playlist-song-item" data-song-id="' + s.id + '" data-song=\'' + JSON.stringify(s).replace(/'/g, '&#39;') + '\'>' +
       dot + '<span>' + escapeHtml(s.title) + ' · ' + escapeHtml((s.artist || []).join(', ')) + '</span>' +
+      '<button class="song-del-btn" data-del-id="' + s.id + '" title="删除">✕</button>' +
     '</div>';
   }
   div.innerHTML = html;
-  // Bind click to play
   div.querySelectorAll('.playlist-song-item').forEach(function (item, idx) {
-    item.addEventListener('click', function () {
+    item.addEventListener('click', function (e) {
+      if (e.target.classList.contains('song-del-btn')) return;
       try {
         var song = JSON.parse(item.dataset.song);
         state.playlist = songs;
@@ -1436,6 +1457,18 @@ function buildSongExpandList (songs) {
         if (dom.audioPlayer) dom.audioPlayer.play().catch(function () {});
       } catch (_) {}
     });
+    var delBtn = item.querySelector('.song-del-btn');
+    if (delBtn) {
+      delBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var songId = this.dataset.delId;
+        if (!plId) return;
+        fetch('/api/playlists/' + plId + '/songs/' + songId, { method: 'DELETE' })
+          .then(function (r) { return r.json(); })
+          .then(function () { item.remove(); showToast('已删除'); })
+          .catch(function (err) { console.error('Delete song error:', err); });
+      });
+    }
   });
   return div;
 }
@@ -1547,12 +1580,56 @@ async function deleteSong (id) {
    TOAST
    ═══════════════════════════════════════════════════════════════ */
 
+function deletePlaylist (plId, plName, cardEl) {
+  showConfirmBar('删除歌单「' + plName + '」？', function () {
+    fetch('/api/playlists/' + plId, { method: 'DELETE' })
+      .then(function (r) { return r.json(); })
+      .then(function () {
+        cardEl.remove();
+        var next = cardEl.nextElementSibling;
+        if (next && next.classList.contains('playlist-songs')) next.remove();
+        showToast('歌单已删除');
+      })
+      .catch(function (err) { console.error('Delete playlist error:', err); showToast('删除失败'); });
+  });
+}
+
 function showToast (msg, isError) {
   var toast = document.createElement('div');
   toast.className = 'toast' + (isError ? ' error' : '');
   toast.textContent = msg;
   document.body.appendChild(toast);
   setTimeout(function () { toast.remove(); }, 3000);
+}
+
+function showConfirmBar (msg, onConfirm, onCancel, inputOpts) {
+  var existing = document.getElementById('confirm-bar');
+  if (existing) existing.remove();
+  var bar = document.createElement('div');
+  bar.id = 'confirm-bar';
+  bar.style.cssText = 'position:fixed;bottom:100px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.85);border:1px solid rgba(255,255,255,0.15);border-radius:12px;padding:12px 20px;color:#fff;font-size:14px;z-index:9999;display:flex;align-items:center;gap:14px;backdrop-filter:blur(10px);flex-wrap:wrap;justify-content:center;';
+  var html = '<span>' + msg + '</span>';
+  if (inputOpts) {
+    html += '<input id="confirm-bar-input" type="text" value="' + (inputOpts.value || '') + '" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.08);color:#fff;font-size:13px;width:180px;outline:none;">';
+  }
+  html += '<button id="confirm-bar-yes" style="padding:6px 16px;border-radius:8px;border:none;background:#22C55E;color:#fff;cursor:pointer;font-size:13px;">' + (inputOpts ? '创建歌单' : '创建') + '</button>' +
+    '<button id="confirm-bar-no" style="padding:6px 16px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:transparent;color:#aaa;cursor:pointer;font-size:13px;">取消</button>';
+  bar.innerHTML = html;
+  bar.querySelector('#confirm-bar-yes').addEventListener('click', function () {
+    var inputVal = inputOpts ? (document.getElementById('confirm-bar-input') || {}).value : null;
+    bar.remove();
+    if (onConfirm) onConfirm(inputVal);
+  });
+  bar.querySelector('#confirm-bar-no').addEventListener('click', function () {
+    bar.remove();
+    if (onCancel) onCancel();
+  });
+  setTimeout(function () {
+    if (document.getElementById('confirm-bar')) {
+      bar.remove();
+      if (onCancel) onCancel();
+    }
+  }, 15000);
 }
 
 /* ═══════════════════════════════════════════════════════════════

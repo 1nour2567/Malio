@@ -341,28 +341,66 @@ class MatrixRain {
             }
           }
           this._captureTarget = closest;
+          const nowCap = performance.now();
           if (closest) {
-            if (closestDist < 15) {
-              // Swallow!
-              closest._swallowed = true;
-              closest._swallowStart = performance.now();
-              closest._swallowX = closest.x;
-              closest._swallowY = closest.y;
-              this._capturedParticles.push({
-                song_id: closest._tag,
-                title: (closest._ewd && closest._ewd.title) || '',
-                energy: (closest._ewd && closest._ewd.energy != null) ? closest._ewd.energy : 0.5,
-                warmth: (closest._ewd && closest._ewd.warmth != null) ? closest._ewd.warmth : 0.5,
-                density: (closest._ewd && closest._ewd.density != null) ? closest._ewd.density : 0.5
-              });
-              this._captureTarget = null;
+            const inZone = closestDist < 15;
+            if (inZone) {
+              // Require 2.5s hold in capture zone to prevent accidental captures
+              if (!closest._captureHoldStart) {
+                closest._captureHoldStart = nowCap;
+              }
+              const holdElapsed = nowCap - closest._captureHoldStart;
+              const holdRequired = 2500;
+              // Visual: scale up gradually during hold (1x → 2.5x)
+              const holdProgress = Math.min(1, holdElapsed / holdRequired);
+              closest._captureScale = 1 + holdProgress * 1.5;  // 1x to 2.5x
+              // Magnetic pull strengthens as hold progresses
+              const pullStrength = 0.15 * holdProgress;
+              closest.vx = (closest.vx || 0) + (this.core.x - closest.x) * pullStrength * 0.08;
+              closest.vy = (closest.vy || 0) + (this.core.y - closest.y) * pullStrength * 0.08;
+              if (holdElapsed >= holdRequired) {
+                // Swallow!
+                closest._swallowed = true;
+                closest._swallowStart = nowCap;
+                closest._swallowX = closest.x;
+                closest._swallowY = closest.y;
+                closest._captureHoldStart = null;
+                closest._captureScale = null;
+                this._capturedParticles.push({
+                  song_id: closest._tag,
+                  title: (closest._ewd && closest._ewd.title) || '',
+                  energy: (closest._ewd && closest._ewd.energy != null) ? closest._ewd.energy : 0.5,
+                  warmth: (closest._ewd && closest._ewd.warmth != null) ? closest._ewd.warmth : 0.5,
+                  density: (closest._ewd && closest._ewd.density != null) ? closest._ewd.density : 0.5
+                });
+                this._captureTarget = null;
+              }
             } else {
-              // Visual scale feedback: 45px→1.0x, 15px→1.8x
+              // Left the zone — reset hold timer
+              closest._captureHoldStart = null;
               closest._captureScale = Math.max(1.0, 1.8 - (closestDist - 15) * 0.027);
-              // Magnetic pull: drift toward core
+              // Light magnetic pull outside zone
               const pullStrength = 0.15 * (1 - closestDist / 60);
               closest.vx = (closest.vx || 0) + (this.core.x - closest.x) * pullStrength * 0.1;
               closest.vy = (closest.vy || 0) + (this.core.y - closest.y) * pullStrength * 0.1;
+            }
+          }
+          // Cleanup hold timers every 30 frames (avoid per-frame 2400-iteration loop)
+          this._holdCleanupCounter = (this._holdCleanupCounter || 0) + 1;
+          if (this._holdCleanupCounter > 30) {
+            this._holdCleanupCounter = 0;
+            for (const lyr of [this._colsFar, this._colsMid, this._colsNear]) {
+              for (const col of lyr) {
+                for (const c of col.stream) {
+                  if (!c._captureHoldStart || c._swallowed) continue;
+                  const dx = c.x - this.core.x;
+                  const dy = c.y - this.core.y;
+                  if (Math.sqrt(dx*dx + dy*dy) > 15) {
+                    c._captureHoldStart = null;
+                    c._captureScale = null;
+                  }
+                }
+              }
             }
           }
         }
@@ -800,6 +838,7 @@ class MatrixRain {
           c._swallowed = false;
           c._swallowStart = null;
           c._captureScale = null;
+          c._captureHoldStart = null;  // reset hold timer
           if (c._frozen) {
             c._frozen = false;
             c._frozenY = null;
@@ -993,17 +1032,25 @@ class MatrixRain {
     this._prevCoreX = this.core.x;
     this._prevCoreY = this.core.y;
     this._rippleTimer += 1;
-    // Spawn ripple when core moves fast enough, max every 3 frames
-    if (coreSpeed > 0.15 && this._rippleTimer > 3) {
+    // Speed-dependent cooldown: faster drag = more ripples
+    const cooldown = Math.max(8, 30 - coreSpeed * 3);
+    if (coreSpeed > 0.5 && this._rippleTimer > cooldown) {
       this._rippleTimer = 0;
-      this._ripples.push({
-        x: this.core.x, y: this.core.y,
-        r: this.core.r * 0.6,
-        maxR: Math.max(40, this.core.r * 0.6 + coreSpeed * 35),  // min visible size
-        alpha: Math.max(0.08, Math.min(0.2, coreSpeed * 0.05)),   // min alpha for slow moves
-        birth: performance.now()
-      });
-      if (this._ripples.length > 12) this._ripples.shift();
+      const newWaves = [
+        { delay: 0,   speed: 220, duration: 180, maxR: 240, ampNear: 20, ampFar: 4,  cycle: 130, stretch: 0.5, brightUp: 1.3 },
+        { delay: 100, speed: 180, duration: 220, maxR: 200, ampNear: 14, ampFar: 3,  cycle: 150, stretch: 0.3, brightUp: 1.15 },
+        { delay: 200, speed: 150, duration: 280, maxR: 170, ampNear: 9,  ampFar: 2,  cycle: 160, stretch: 0.15, alphaDrop: 0.88 },
+      ];
+      if (this._burst) {
+        for (const w of newWaves) this._burst.waves.push(w);
+      } else {
+        this._burst = {
+          start: performance.now(),
+          color: this._targetParams.color || '#22C55E',
+          dirX: 0,
+          waves: newWaves
+        };
+      }
     }
 
     // Time fade level lerp
@@ -1047,7 +1094,11 @@ class MatrixRain {
     // Water ripple burst — sine wave oscillation from core
     if (this._burst) {
       const elapsed = now - this._burst.start;
-      if (elapsed > 700) { this._burst = null; }
+      // Remove expired waves individually instead of killing entire burst
+      this._burst.waves = this._burst.waves.filter(function (w) {
+        return (elapsed - w.delay) < w.duration * 1.2;
+      });
+      if (this._burst.waves.length === 0) { this._burst = null; }
       else {
         const cx = this.core.x, cy = this.core.y;
         const coreImmune = 25;
@@ -1308,7 +1359,8 @@ class MatrixRain {
 
         // Luminance gradient
         const memoryBoost = 1 + Math.min(0.5, (c.mem || 0) * 0.05);
-        const infoBoost = c._tag ? 1.15 : 1.0;
+        const isSummon = this._summonActive || (this._nebula && this._nebula.active);
+        const infoBoost = c._tag ? (isSummon ? 1.75 : 1.15) : 1.0;
         let yBright = (0.65 + 0.35 * Math.min(1, c.y / h)) * infoBoost * warpBoost * memoryBoost;
         if (c._wbright) yBright *= Math.min(2, c._wbright);
         const depthBright = layer.brightness * layerFade;
@@ -1726,35 +1778,28 @@ class MatrixRain {
       ctx.fillText(String(count), badgeX, badgeY);
     }
 
-    // ── Water ripples: expanding rings around core ──
+    // ── Water ripples: thin expanding rings, interference pattern ──
     const nowR = performance.now();
     for (let i = this._ripples.length - 1; i >= 0; i--) {
       const rip = this._ripples[i];
       const age = nowR - rip.birth;
-      const life = 600;  // ripple lifetime in ms
-      if (age > life) {
-        this._ripples.splice(i, 1);
-        continue;
-      }
-      const progress = age / life;  // 0 → 1
-      rip.r = rip.maxR * (0.05 + 0.95 * progress);  // expand from center
-      rip.alpha = rip.alpha * (1 - progress);        // fade out
-      if (rip.alpha < 0.005) continue;
-      // Draw ripple ring
+      const delay = rip.delay || 0;
+      const life = 600;
+      const activeAge = age - delay;
+      if (activeAge < 0) continue;
+      if (activeAge > life) { this._ripples.splice(i, 1); continue; }
+      const progress = activeAge / life;
+      const speedMul = rip.speedMul || 1;
+      rip.r = rip.maxR * Math.min(1, progress * speedMul);
+      rip.alpha = rip.alpha * (1 - progress);
+      if (rip.alpha < 0.003) continue;
+      // Thin sharp stroke — water ripple interference ring
+      const a = rip.alpha.toFixed(3);
       ctx.beginPath();
       ctx.arc(rip.x, rip.y, rip.r, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(' + _rr + ',' + _gg + ',' + _bb + ',' + rip.alpha.toFixed(3) + ')';
-      ctx.lineWidth = 1.5 * (1 - progress * 0.7);
-      ctx.globalAlpha = 1;
+      ctx.strokeStyle = 'rgba(' + _rr + ',' + _gg + ',' + _bb + ',' + a + ')';
+      ctx.lineWidth = 1.0 + (1 - progress) * 1.2;  // 2.2px→1.0px
       ctx.stroke();
-      // Secondary ghost ring (double ripple for depth)
-      if (progress > 0.3 && progress < 0.8) {
-        ctx.beginPath();
-        ctx.arc(rip.x, rip.y, rip.r * 0.7, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(' + _rr + ',' + _gg + ',' + _bb + ',' + (rip.alpha * 0.4).toFixed(3) + ')';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-      }
     }
 
     ctx.globalAlpha = 1;
