@@ -357,6 +357,17 @@ class PersonaEngine:
         elif event_type == "nebula_capture":
             delta_w = +self._drift_rate * 0.8    # saving songs → warmth up
             reason = "用户捕获歌曲"
+        elif event_type == "core_release":
+            zone = (detail or {}).get("zone", "")
+            if zone == "warm":
+                delta_w = +self._drift_rate * 0.5
+            elif zone == "cool":
+                delta_w = -self._drift_rate * 0.3
+            elif zone == "energy":
+                delta_e = +self._drift_rate * 0.6
+            elif zone == "calm":
+                delta_e = -self._drift_rate * 0.3
+            reason = f"内核释放选歌({zone})"
 
         if reason:
             self._apply_drift(delta_e, delta_w, delta_p, reason)

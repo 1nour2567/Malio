@@ -223,22 +223,68 @@ if (typeof engine !== 'undefined') {
   engine.onCaptureComplete = function (capturedSongs) {
     if (!capturedSongs || !capturedSongs.length) return;
     if (wsClient) wsClient.sendCoreEvent('nebula_capture', { count: capturedSongs.length });
-    // Show confirmation dialog
-    var names = capturedSongs.map(function(s) { return s.title || '?' ; }).join('、');
-    if (confirm('将「' + names + '」的能量种子交给 Malio，生成新歌单？')) {
-      fetch('/api/playlists/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ captured_songs: capturedSongs })
-      })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        if (data.playlist_name) {
-          showToast('歌单「' + data.playlist_name + '」已生成（' + data.total + ' 首）');
-        }
-      })
-      .catch(function(err) { console.error('Capture error:', err); });
+    // Auto-generate playlist without blocking confirm()
+    var names = capturedSongs.map(function(s) { return s.title || '?' ; }).slice(0, 3).join('、');
+    if (capturedSongs.length > 3) names += '等' + capturedSongs.length + '首';
+    showToast('✨ 捕获 ' + names + '，正在生成歌单...');
+    fetch('/api/playlists/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ captured_songs: capturedSongs })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.playlist_name) {
+        showToast('歌单「' + data.playlist_name + '」已生成（' + data.total + ' 首）');
+      }
+    })
+    .catch(function(err) { console.error('Capture error:', err); showToast('歌单生成失败，请重试'); });
+  };
+
+  // Reverse embodiment: core drag release → music zone intent
+  engine.onCoreRelease = function (pos) {
+    var w = window.innerWidth, h = window.innerHeight;
+    var rx = pos.rx, ry = pos.ry;
+    var zone = '';
+    var mood = '';
+    // Determine dominant zone: horizontal or vertical
+    if (Math.abs(rx) > Math.abs(ry)) {
+      zone = rx > 0 ? 'warm' : 'cool';
+    } else {
+      zone = ry < 0 ? 'energy' : 'calm';
     }
+    // Map zone to music mood
+    var moodMap = {
+      warm:   { label: '温暖', prompt: '推荐一首温暖治愈的歌' },
+      cool:   { label: '冷静', prompt: '推荐一首安静放松的纯音乐' },
+      energy: { label: '高能', prompt: '推荐一首嗨到爆的电音' },
+      calm:   { label: '舒缓', prompt: '推荐一首舒缓的慢歌' }
+    };
+    var mapping = moodMap[zone];
+    if (!mapping) return;
+    showToast('✨ 内核释放到' + mapping.label + '区，切换氛围...');
+    // Send to backend as chat message for full pipeline processing
+    if (wsClient) wsClient.sendCoreEvent('core_release', { zone: zone, rx: rx, ry: ry });
+    // Trigger song recommendation matching the zone
+    fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: state.userId, input: mapping.prompt })
+    }).then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.response) addChatMessage('Malio', data.response);
+      if (data.recommendations && data.recommendations.length) {
+        state.recommendations = data.recommendations;
+        state.playlist = data.recommendations;
+        state.playlistIndex = 0;
+        if (data.auto_play !== false && data.recommendations[0]) {
+          setCurrentSong(data.recommendations[0]);
+          state.isPlaying = true;
+          updatePlayIcon();
+          if (dom.audioPlayer) dom.audioPlayer.play().catch(function(){});
+        }
+      }
+    }).catch(function(err) { console.error('Core release error:', err); });
   };
 }
 
@@ -1570,12 +1616,15 @@ function setupWsClient () {
       _executeCoreAction(data.core_action);
     }
     if (data.atmosphere && typeof engine !== 'undefined') {
-      // Store persona color, apply weighted blend
       if (data.atmosphere.color) state._personaColor = data.atmosphere.color;
       var atm = Object.assign({}, data.atmosphere);
       delete atm.color; delete atm.amplitude; delete atm.density;
       engine.updateParams(atm, 0.015);
       applyBlendedColor();
+    }
+    // Store weather for DSL rules
+    if (data.weather) {
+      window._lastWeather = data.weather;
     }
   };
 

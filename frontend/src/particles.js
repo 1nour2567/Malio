@@ -157,6 +157,7 @@ class MatrixRain {
     this.onSwipe = null;            // callback for swipe gesture
     this.onTimeWarp = null;         // callback for double-tap pause
     this.onCaptureComplete = null;  // callback for nebula capture → playlist
+    this.onCoreRelease = null;     // callback for reverse embodiment: core position → music
     /* audio reactivity */
     this._audio = { bass: 0, mid: 0, treble: 0, beat: 0 };
     /* search mode */
@@ -314,13 +315,15 @@ class MatrixRain {
         this.core.x = pos.x;
         this.core.y = pos.y;
 
-        // Nebula capture: find closest frozen particle to core
+        // Nebula capture: find closest info particle to core (no frozen req)
         if (this._summonActive || (this._nebula && this._nebula.active)) {
-          let closest = null, closestDist = 25;
+          // Build set of already-captured song_ids for dedup
+          const capturedIds = new Set(this._capturedParticles.map(function(p) { return p.song_id; }));
+          let closest = null, closestDist = 60;
           for (const lyr of [this._colsFar, this._colsMid, this._colsNear]) {
             for (const col of lyr) {
               for (const c of col.stream) {
-                if (!c._frozen || !c._tag || c._swallowed) continue;
+                if (!c._tag || c._swallowed || capturedIds.has(c._tag)) continue;
                 const dx = c.x - this.core.x;
                 const dy = c.y - this.core.y;
                 const dist = Math.sqrt(dx*dx + dy*dy);
@@ -330,8 +333,7 @@ class MatrixRain {
           }
           this._captureTarget = closest;
           if (closest) {
-            // Scale: 20px→1.0x, 10px→1.5x, 5px→swallow
-            if (closestDist < 5) {
+            if (closestDist < 15) {
               // Swallow!
               closest._swallowed = true;
               closest._swallowStart = performance.now();
@@ -346,7 +348,12 @@ class MatrixRain {
               });
               this._captureTarget = null;
             } else {
-              closest._captureScale = Math.max(1.0, 1.5 - (closestDist - 10) * 0.05);
+              // Visual scale feedback: 45px→1.0x, 15px→1.8x
+              closest._captureScale = Math.max(1.0, 1.8 - (closestDist - 15) * 0.027);
+              // Magnetic pull: drift toward core
+              const pullStrength = 0.15 * (1 - closestDist / 60);
+              closest.vx = (closest.vx || 0) + (this.core.x - closest.x) * pullStrength * 0.1;
+              closest.vy = (closest.vy || 0) + (this.core.y - closest.y) * pullStrength * 0.1;
             }
           }
         }
@@ -361,6 +368,16 @@ class MatrixRain {
         this._returning = true;
         this._retVX = 0;
         this._retVY = 0;
+        // Reverse embodiment: release position → music zone
+        if (typeof this.onCoreRelease === 'function') {
+          const w = this.canvas.width, h = this.canvas.height;
+          const rx = (this.core.x - w / 2) / (w / 2);  // -1(left) to +1(right)
+          const ry = (this.core.y - h / 2) / (h / 2);  // -1(top) to +1(bottom)
+          const dist = Math.sqrt(rx * rx + ry * ry);
+          if (dist > 0.25) {  // dead zone: ignore small drags
+            this.onCoreRelease({ x: this.core.x, y: this.core.y, rx: rx, ry: ry, dist: dist });
+          }
+        }
       }
       this._dragging = false;
       _swiping = false;
@@ -589,7 +606,9 @@ class MatrixRain {
 
   _infoChar () {
     if (this._infoChars.length === 0) return null;
-    if (Math.random() < 0.03) {
+    // During summon: dramatically boost info particle spawn rate for capture
+    const spawnChance = (this._summonActive || (this._nebula && this._nebula.active)) ? 0.25 : 0.03;
+    if (Math.random() < spawnChance) {
       const i = Math.floor(Math.random() * this._infoChars.length);
       const tag = this._infoTags[i];
       const sd = this._songData[tag] || {};
@@ -1088,14 +1107,15 @@ class MatrixRain {
           if (c.tick > 40 + Math.floor(Math.random() * 50)) {
             c.tick = 0;
             const info = this._infoChar();
-            if (info && this._infoCols.has(col)) { /* column occupied — stay random */ }
+            const isSummon = this._summonActive || (this._nebula && this._nebula.active);
+            if (info && !isSummon && this._infoCols.has(col)) { /* column occupied — stay random */ }
             else if (info) {
-              if (c._tag) this._infoCols.delete(col); // free previous column if was info
+              if (c._tag) this._infoCols.delete(col);
               c.char = info.chars; c._tag = info.tag;
               c._ewd = { energy: info.energy, warmth: info.warmth, density: info.density };
               c._rgb = ewdToRgb(info.energy, info.warmth, info.density);
               c._infoSpeedMul = 1.15 + Math.random() * 0.15;
-              this._infoCols.add(col);
+              if (!isSummon) this._infoCols.add(col);  // don't block column during summon
             } else {
               if (c._tag) this._infoCols.delete(col); // was info, now normal
               c.char = randChars(); c._tag = null; c._ewd = null; c._rgb = null; c._infoSpeedMul = 0;
@@ -1116,13 +1136,14 @@ class MatrixRain {
               // Normal particle: immediate respawn in same column
               c.y -= h + stream.length * CHAR_GAP + 20;
               const info2 = Math.random() < 0.5 ? this._infoChar() : null;
-              if (info2 && this._infoCols.has(col)) { /* column occupied */ }
+              const isSummon2 = this._summonActive || (this._nebula && this._nebula.active);
+              if (info2 && !isSummon2 && this._infoCols.has(col)) { /* column occupied */ }
               else if (info2) {
                 c.char = info2.chars; c._tag = info2.tag;
                 c._ewd = { energy: info2.energy, warmth: info2.warmth, density: info2.density };
                 c._rgb = ewdToRgb(info2.energy, info2.warmth, info2.density);
                 c._infoSpeedMul = 1.15 + Math.random() * 0.15;
-                this._infoCols.add(col);
+                if (!isSummon2) this._infoCols.add(col);
               } else { c.char = randChars(); c._tag = null; c._ewd = null; c._rgb = null; c._infoSpeedMul = 0; }
               c.tick = 0;
             }
@@ -1179,8 +1200,9 @@ class MatrixRain {
         }
 
         // Luminance gradient
-        const memoryBoost = 1 + Math.min(0.5, (c.mem || 0) * 0.05); /* veteran particles glow */
-        const infoBoost = c._tag ? 1.15 : 1.0;
+        const memoryBoost = 1 + Math.min(0.5, (c.mem || 0) * 0.05);
+        const isSummon = this._summonActive || (this._nebula && this._nebula.active);
+        const infoBoost = c._tag ? (isSummon ? 3.0 : 1.15) : 1.0;
         let yBright = (0.65 + 0.35 * Math.min(1, c.y / h)) * infoBoost * warpBoost * memoryBoost;
         if (c._wbright) yBright *= Math.min(2, c._wbright);
         const depthBright = layer.brightness * layerFade;
@@ -1540,6 +1562,26 @@ class MatrixRain {
         ctx.arc(cx, cy, cr, 0, Math.PI * 2);
         ctx.fill();
       }
+    }
+
+    // ── Capture count badge ──
+    if ((this._summonActive || (this._nebula && this._nebula.active)) && this._capturedParticles.length > 0) {
+      const badgeX = this.core.x + 18, badgeY = this.core.y - 22;
+      const count = this._capturedParticles.length;
+      // Glow ring
+      ctx.beginPath();
+      ctx.arc(badgeX, badgeY, 12, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(34,197,94,0.25)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(34,197,94,0.6)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      // Count number
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(count), badgeX, badgeY);
     }
 
     // ── Water ripples: expanding rings around core ──
