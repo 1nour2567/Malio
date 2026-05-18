@@ -1348,20 +1348,31 @@ function renderUserPlaylists (playlists) {
         '<div class="card-name">' + escapeHtml(pl.name) + '</div>' +
         '<div class="card-meta">' + (pl.song_count || 0) + ' 首</div>' +
       '</div>' +
+      '<button class="playlist-del-btn" style="position:absolute;bottom:6px;right:6px;width:20px;height:20px;border-radius:50%;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.4);color:#888;font-size:10px;cursor:pointer;line-height:1;z-index:5;">✕</button>' +
       '<span class="card-arrow">▸</span>';
     card._plId = pl.id;
-    // Long-press (3s) to delete playlist
-    var _holdTimer = null, _holdFired = false;
-    var startHold = function () { _holdFired = false; _holdTimer = setTimeout(function () { _holdFired = true; deletePlaylist(pl.id, pl.name, card); }, 3000); };
-    var cancelHold = function () { clearTimeout(_holdTimer); };
-    card.addEventListener('mousedown', startHold);
-    card.addEventListener('mouseup', cancelHold);
-    // Don't cancel on mouseleave — tiny movements during 3s hold break it
-    card.addEventListener('touchstart', startHold);
-    card.addEventListener('touchend', cancelHold);
+    // Delete button — same pattern as song delete
+    var plDelBtn = card.querySelector('.playlist-del-btn');
+    if (plDelBtn) {
+      plDelBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        showConfirmBar('删除歌单「' + pl.name + '」？', function () {
+          fetch('/api/playlists/' + pl.id, { method: 'DELETE' })
+            .then(function (r) { return r.json(); })
+            .then(function () {
+              card.remove();
+              var nxt = card.nextElementSibling;
+              if (nxt && nxt.classList.contains('playlist-songs')) nxt.remove();
+              showToast('歌单已删除');
+            })
+            .catch(function () { showToast('删除失败'); });
+        });
+      });
+    }
+
     card.addEventListener('click', function (plId, el) {
-      if (_holdFired) { _holdFired = false; return; }  // long-press triggered, skip click
-      return function () {
+      return function (e) {
+        if (e.target.classList.contains('playlist-del-btn')) return;
         var list = el.nextElementSibling;
         if (list && list.classList.contains('playlist-songs')) {
           list.hidden = !list.hidden;
@@ -1580,20 +1591,6 @@ async function deleteSong (id) {
    TOAST
    ═══════════════════════════════════════════════════════════════ */
 
-function deletePlaylist (plId, plName, cardEl) {
-  showConfirmBar('删除歌单「' + plName + '」？', function () {
-    fetch('/api/playlists/' + plId, { method: 'DELETE' })
-      .then(function (r) { return r.json(); })
-      .then(function () {
-        cardEl.remove();
-        var next = cardEl.nextElementSibling;
-        if (next && next.classList.contains('playlist-songs')) next.remove();
-        showToast('歌单已删除');
-      })
-      .catch(function (err) { console.error('Delete playlist error:', err); showToast('删除失败'); });
-  });
-}
-
 function showToast (msg, isError) {
   var toast = document.createElement('div');
   toast.className = 'toast' + (isError ? ' error' : '');
@@ -1615,6 +1612,7 @@ function showConfirmBar (msg, onConfirm, onCancel, inputOpts) {
   html += '<button id="confirm-bar-yes" style="padding:6px 16px;border-radius:8px;border:none;background:#22C55E;color:#fff;cursor:pointer;font-size:13px;">' + (inputOpts ? '创建歌单' : '创建') + '</button>' +
     '<button id="confirm-bar-no" style="padding:6px 16px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:transparent;color:#aaa;cursor:pointer;font-size:13px;">取消</button>';
   bar.innerHTML = html;
+  document.body.appendChild(bar);
   bar.querySelector('#confirm-bar-yes').addEventListener('click', function () {
     var inputVal = inputOpts ? (document.getElementById('confirm-bar-input') || {}).value : null;
     bar.remove();

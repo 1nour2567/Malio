@@ -341,66 +341,29 @@ class MatrixRain {
             }
           }
           this._captureTarget = closest;
-          const nowCap = performance.now();
           if (closest) {
-            const inZone = closestDist < 15;
-            if (inZone) {
-              // Require 2.5s hold in capture zone to prevent accidental captures
-              if (!closest._captureHoldStart) {
-                closest._captureHoldStart = nowCap;
-              }
-              const holdElapsed = nowCap - closest._captureHoldStart;
-              const holdRequired = 2500;
-              // Visual: scale up gradually during hold (1x → 2.5x)
-              const holdProgress = Math.min(1, holdElapsed / holdRequired);
-              closest._captureScale = 1 + holdProgress * 1.5;  // 1x to 2.5x
-              // Magnetic pull strengthens as hold progresses
-              const pullStrength = 0.15 * holdProgress;
-              closest.vx = (closest.vx || 0) + (this.core.x - closest.x) * pullStrength * 0.08;
-              closest.vy = (closest.vy || 0) + (this.core.y - closest.y) * pullStrength * 0.08;
-              if (holdElapsed >= holdRequired) {
-                // Swallow!
-                closest._swallowed = true;
-                closest._swallowStart = nowCap;
-                closest._swallowX = closest.x;
-                closest._swallowY = closest.y;
-                closest._captureHoldStart = null;
-                closest._captureScale = null;
-                this._capturedParticles.push({
-                  song_id: closest._tag,
-                  title: (closest._ewd && closest._ewd.title) || '',
-                  energy: (closest._ewd && closest._ewd.energy != null) ? closest._ewd.energy : 0.5,
-                  warmth: (closest._ewd && closest._ewd.warmth != null) ? closest._ewd.warmth : 0.5,
-                  density: (closest._ewd && closest._ewd.density != null) ? closest._ewd.density : 0.5
-                });
-                this._captureTarget = null;
-              }
+            // Magnetic pull: drift toward core. Stronger when closer.
+            const pullStrength = 0.12 * (1 - closestDist / 60);
+            closest.vx = (closest.vx || 0) + (this.core.x - closest.x) * pullStrength * 0.12;
+            closest.vy = (closest.vy || 0) + (this.core.y - closest.y) * pullStrength * 0.12;
+            if (closestDist < 15) {
+              // Swallow immediately — magnetic pull makes it intentional enough
+              closest._swallowed = true;
+              closest._swallowStart = performance.now();
+              closest._swallowX = closest.x;
+              closest._swallowY = closest.y;
+              closest._captureScale = null;
+              this._capturedParticles.push({
+                song_id: closest._tag,
+                title: (closest._ewd && closest._ewd.title) || '',
+                energy: (closest._ewd && closest._ewd.energy != null) ? closest._ewd.energy : 0.5,
+                warmth: (closest._ewd && closest._ewd.warmth != null) ? closest._ewd.warmth : 0.5,
+                density: (closest._ewd && closest._ewd.density != null) ? closest._ewd.density : 0.5
+              });
+              this._captureTarget = null;
             } else {
-              // Left the zone — reset hold timer
-              closest._captureHoldStart = null;
-              closest._captureScale = Math.max(1.0, 1.8 - (closestDist - 15) * 0.027);
-              // Light magnetic pull outside zone
-              const pullStrength = 0.15 * (1 - closestDist / 60);
-              closest.vx = (closest.vx || 0) + (this.core.x - closest.x) * pullStrength * 0.1;
-              closest.vy = (closest.vy || 0) + (this.core.y - closest.y) * pullStrength * 0.1;
-            }
-          }
-          // Cleanup hold timers every 30 frames (avoid per-frame 2400-iteration loop)
-          this._holdCleanupCounter = (this._holdCleanupCounter || 0) + 1;
-          if (this._holdCleanupCounter > 30) {
-            this._holdCleanupCounter = 0;
-            for (const lyr of [this._colsFar, this._colsMid, this._colsNear]) {
-              for (const col of lyr) {
-                for (const c of col.stream) {
-                  if (!c._captureHoldStart || c._swallowed) continue;
-                  const dx = c.x - this.core.x;
-                  const dy = c.y - this.core.y;
-                  if (Math.sqrt(dx*dx + dy*dy) > 15) {
-                    c._captureHoldStart = null;
-                    c._captureScale = null;
-                  }
-                }
-              }
+              // Visual scale: particle gets bigger as it nears core
+              closest._captureScale = Math.max(1.0, 2.0 - (closestDist - 15) * 0.033);
             }
           }
         }
@@ -838,7 +801,6 @@ class MatrixRain {
           c._swallowed = false;
           c._swallowStart = null;
           c._captureScale = null;
-          c._captureHoldStart = null;  // reset hold timer
           if (c._frozen) {
             c._frozen = false;
             c._frozenY = null;
