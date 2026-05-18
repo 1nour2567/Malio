@@ -298,8 +298,21 @@ cd ../frontend && npx vite --host   # 前端 :5173
 |-------|------|-----|------|
 | **Router** (Pipeline) | 意图分类 + 任务委派 + 结果组装 | ✓ DeepSeek Flash | 生产 |
 | **MusicAgent** | 音乐搜索、推荐、选歌、DJ 文案 | ✓ 独立 ReAct | 生产 |
-| **VisualAgent** | 粒子控制、颜色生成、core_actions | ✗ 规则引擎 | 下一步 |
+| **VisualAgent** | 规则引擎：atmosphere 推导、颜色混合、core_action 约束、**DSL 规则生命周期管理** | ✗ 规则引擎 | 生产 |
+| **LLMAutonomous** | 事件驱动自主行为：观察交互→写规则或做动作，含反重复记忆 | ✓ DeepSeek | 生产 |
 | **MemoryAgent** | L3 蒸馏、偏好衰减、确认队列 | ✗ 定时任务 | 后续 |
+
+### 三层规则治理架构
+
+```
+T1: LLM 观察者 (llm_autonomous.py)  → 发现模式 → 写 DSL 规则
+T2: VisualAgent 管理器 (manage_rules) → persona+天气+时间 → 调整/启停规则
+T3: DSL 执行器 (particle-rules.js)   → 60fps WHEN→THEN → 控制粒子参数
+```
+
+- **T1 有 LLM 成本**（每次观察周期一次），**T2 和 T3 零 LLM 成本**
+- VisualAgent 每 5 分钟评估所有规则：低能量停加速规则、雨天暖化冷色、深夜自动降速+天亮恢复
+- LLM 写规则、VisualAgent 管规则、DSL 跑规则——三者分工明确，不重叠
 
 ### MusicAgent 数据流
 
@@ -316,10 +329,6 @@ cd ../frontend && npx vite --host   # 前端 :5173
   → Pipeline Stage 4/5: 按 selected_song_id 设播放队列
   → 前端: 🎵 歌名 — 歌手 + DJ 文案
 ```
-
-### 当前状态
-
-VisualAgent 已上线。多 Agent 架构全在生产中运行。
 
 ---
 

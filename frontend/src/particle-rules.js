@@ -148,6 +148,21 @@ class ParticleRules {
   evaluate (now) {
     const ctx = this._buildContext(now);
 
+    // ── Rule feedback loop (OODA): report health every 30s ──
+    this._feedbackAcc = (this._feedbackAcc || 0) + (now - (this._lastEvalTime || now));
+    this._lastEvalTime = now;
+    if (this._feedbackAcc > 30000) {
+      this._feedbackAcc = 0;
+      const feedback = this.rules.map(function (r) {
+        return { id: r.id, hits: r._hits, active: r._active,
+                 lastFire: Math.round((now - r._lastFire) / 1000),
+                 priority: r.priority, when: r.when, then: r.then };
+      });
+      if (typeof this.engine.onRuleFeedback === 'function') {
+        this.engine.onRuleFeedback(feedback);
+      }
+    }
+
     for (const rule of this.rules) {
       if (!rule._active) continue;
 
@@ -195,6 +210,7 @@ class ParticleRules {
 
   _buildContext (now) {
     const time = new Date();
+    const wx = (typeof window !== 'undefined' && window._lastWeather) || {};
     return {
       time: time,
       hour: time.getHours(),
@@ -205,6 +221,11 @@ class ParticleRules {
       audio: this.engine._audio || { bass: 0, mid: 0, treble: 0, beat: 0 },
       count: (this.engine.particles || this.engine._colsNear || []).length,
       event: this._eventNow(now),
+      weather_cond: (wx.condition || '').toLowerCase(),
+      temp: wx.temperature != null ? wx.temperature : 20,
+      humidity: wx.humidity != null ? wx.humidity : 50,
+      wind_speed: wx.wind_speed != null ? wx.wind_speed : 0,
+      clouds: wx.clouds != null ? wx.clouds : 0,
     };
   }
 
@@ -236,6 +257,12 @@ class ParticleRules {
       case 'mid_gt': return ctx.audio.mid > cond.val;
       case 'treble_gt': return ctx.audio.treble > cond.val;
       case 'day_in': return cond.val.includes(ctx.day);
+      case 'weather_is': return cond.val.split(',').some(function(w) { return ctx.weather_cond.includes(w.trim()); });
+      case 'temp_gt': return ctx.temp > cond.val;
+      case 'temp_lt': return ctx.temp < cond.val;
+      case 'humidity_gt': return ctx.humidity > cond.val;
+      case 'wind_gt': return ctx.wind_speed > cond.val;
+      case 'clouds_gt': return ctx.clouds > cond.val;
       default: return false;
     }
   }

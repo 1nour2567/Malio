@@ -242,6 +242,13 @@ if (typeof engine !== 'undefined') {
   };
 
   // Reverse embodiment: core drag release → music zone intent
+  // Rule feedback loop: report rule health back to LLM via WebSocket
+  engine.onRuleFeedback = function (rules) {
+    if (wsClient && rules && rules.length) {
+      wsClient.sendCoreEvent('rule_feedback', { rules: rules });
+    }
+  };
+
   engine.onCoreRelease = function (pos) {
     var w = window.innerWidth, h = window.innerHeight;
     var rx = pos.rx, ry = pos.ry;
@@ -641,6 +648,8 @@ function setCurrentSong (song) {
     var ew = song.energy != null ? song.energy : 0.5;
     var wm = song.warmth != null ? song.warmth : 0.5;
     var dn = song.density != null ? song.density : 0.5;
+    // Feed current E/W/D to capture filter
+    if (typeof engine.setCurrentSongEWD === 'function') engine.setCurrentSongEWD(ew, wm, dn);
     // HSL: energy→hue (240→0), warmth→sat (30%→90%), density→light (75%→25%)
     var h = Math.round(240 - ew * 240);  // 240°=blue(cold), 0°=red(hot)
     var s = Math.round(30 + wm * 60);     // 30%=muted, 90%=vivid
@@ -1656,13 +1665,17 @@ function _executeCoreAction (ca) {
       engine.triggerLightBurst(params.color);
       break;
     case 'move_core':
-      engine.core.x += (params.x || 0);
-      engine.core.y += (params.y || 0);
+      // Drift smoothly to target, then spring back — not instant jump
+      engine._driftStartX = engine.core.x;
+      engine._driftStartY = engine.core.y;
+      engine._driftTargetX = engine.core.x + (params.x || 0);
+      engine._driftTargetY = engine.core.y + (params.y || 0);
+      engine._driftStartTime = performance.now();
+      engine._driftDuration = 2000 + Math.random() * 1500; // 2-3.5s drift
       engine._settled = false;
-      engine._returning = true;
       break;
     case 'set_size':
-      if (params.radius) engine.core.r = Math.max(10, Math.min(80, params.radius));
+      if (params.radius) engine._targetCoreR = Math.max(10, Math.min(80, params.radius));
       break;
     case 'time_warp':
       if (params.active && !engine._timeWarp) {

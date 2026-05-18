@@ -43,6 +43,7 @@ class Feedback:
             "atmosphere": None,
             "core_mode": "dot",      # dot / vortex / error
             "core_action": None,     # Agent-commanded core action
+            "weather": None,          # raw weather context for DSL rules
             "timestamp": datetime.now().isoformat(),
             "seq": self._seq,
         }

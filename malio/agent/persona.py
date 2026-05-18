@@ -210,13 +210,23 @@ class PersonaEngine:
     # ═══════════════════════════════════════════════════════════
 
     def maybe_autonomous_action(self) -> dict:
-        """Roll for autonomous behavior. Returns a core_action or None."""
-        # Energy determines activation probability
-        if random.random() > self.energy:
+        """Roll for autonomous behavior. Returns a core_action or None.
+        Activation threshold lowered so even low-energy state has subtle movement."""
+        # Activation: always some chance, scaled by energy
+        base_chance = 0.35 + self.energy * 0.55  # 35% at energy=0, 90% at energy=1
+        if random.random() > base_chance:
             return None
 
-        # Playfulness determines action variety
         actions_pool = []
+
+        # ── Micro-drift: always available, very small, makes core feel "restless" ──
+        micro_range = 8 + self.energy * 20  # 8px (low energy) to 28px (high energy)
+        actions_pool.append(
+            {"action": "move_core", "params": {
+                "x": round(random.uniform(-micro_range, micro_range), 0),
+                "y": round(random.uniform(-micro_range, micro_range), 0)}}
+        )
+
         if self.playfulness > 0.3:
             actions_pool.extend([
                 {"action": "breath", "params": {"rate": round(random.uniform(0.008, 0.025), 3),
@@ -230,9 +240,6 @@ class PersonaEngine:
             if self.energy > 0.7:
                 shape_choices.extend(["star", "pulse_ring", "swirl"])
             actions_pool.extend([
-                {"action": "move_core", "params": {
-                    "x": round(random.uniform(-25, 25), 0),
-                    "y": round(random.uniform(-25, 25), 0)}},
                 {"action": "set_mode", "params": {"mode": random.choice(["dot", "vortex"])}},
                 {"action": "set_shape", "params": {"shape": random.choice(shape_choices)}},
             ])
@@ -245,8 +252,6 @@ class PersonaEngine:
                 {"action": "light_burst", "params": {"color": self._random_warm_color()}}
             )
 
-        if not actions_pool:
-            return None
         return random.choice(actions_pool)
 
     def _random_warm_color(self) -> str:

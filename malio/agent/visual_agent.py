@@ -111,6 +111,31 @@ class VisualAgent:
 
     # ── Rule lifecycle management ────────────────────────────
 
+    @staticmethod
+    def _score_rule(rule: Dict, now_ts: float = None) -> float:
+        """Score rule quality: f(hits, active, lifespan). 0=dead, 1=excellent."""
+        hits = rule.get("_hits", 0)
+        active = rule.get("_active", True)
+        created_at = rule.get("_created_at") or rule.get("_added_at", 0)
+
+        # Base: hits/50 caps at 1.0
+        score = min(1.0, hits / 50.0)
+
+        # Suppressed/dead rules heavily penalized
+        if not active:
+            score *= 0.2
+
+        # Never-fired rules that are old → likely wrong
+        lifespan_s = (now_ts or __import__('time').time()) - created_at if created_at else 0
+        if hits == 0 and lifespan_s > 3600:
+            score *= 0.1
+
+        # Proven rules (hits > 10) get bonus
+        if hits > 10:
+            score = min(1.0, score + 0.15)
+
+        return round(score, 2)
+
     async def _manage_rules(self, weather: Dict = None) -> Dict:
         """Evaluate all active rules against persona + weather + time.
         Suppress/boost/adjust rules without LLM. Called from atmosphere loop."""
@@ -121,14 +146,21 @@ class VisualAgent:
             return {"managed": 0, "changes": []}
 
         now = datetime.now()
+        now_ts = now.timestamp()
         weather = weather or {}
         changes = []
+        scored_ids = []
 
         for rule in rules:
             actions = rule.get("then", [])
             if not isinstance(actions, list):
                 continue
             rule_changed = False
+
+            # Track first-seen time for scoring
+            if not rule.get("_added_at"):
+                rule["_added_at"] = now_ts
+
             cond = (weather.get("condition") or "").lower()
             is_rain = any(w in cond for w in ("rain", "drizzle", "thunderstorm"))
             is_cloudy = "cloud" in cond
@@ -143,10 +175,12 @@ class VisualAgent:
                 if self.persona.energy < 0.2:
                     if target == "speed" and isinstance(val, (int, float)) and val > 1.0:
                         rule["_active"] = False
+                        rule["_suppressed_by"] = "low_energy"
                         rule_changed = True
                         changes.append(f"deactivated speed {val} (energy={self.persona.energy:.2f})")
                     if target == "brightness" and isinstance(val, (int, float)) and val > 0.7:
                         rule["_active"] = False
+                        rule["_suppressed_by"] = "low_energy"
                         rule_changed = True
 
                 # Rain/cloudy: warmify cool colors
@@ -177,10 +211,17 @@ class VisualAgent:
                     rule_changed = True
                     changes.append("lifted night speed cap")
 
+            # Compute quality score and attach to rule
+            score = self._score_rule(rule, now_ts)
+            if rule.get("_score") != score:
+                rule["_score"] = score
+                rule_changed = True
+            scored_ids.append(f"{rule.get('id','?')[-6:]}:{score}")
+
             if rule_changed and self.feedback_mgr:
                 await self.feedback_mgr.push_rule(rule)
 
-        return {"managed": len(rules), "changes": changes}
+        return {"managed": len(rules), "changes": changes, "scores": scored_ids}
 
     # ── Color utilities ──────────────────────────────────────
 
