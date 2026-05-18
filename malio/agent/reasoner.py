@@ -162,15 +162,9 @@ class Reasoner:
             "response": "Your natural-language reply to the user in Chinese. CRITICAL: never mention specific song titles in this field — use descriptive terms like '一首温暖的慢歌' instead. Song names will be inserted by the system.",
             "selected_song_id": "song_id from the tool results that you picked as the primary recommendation, or empty string if not recommending",
             "actions": [],
-            "core_actions": [{
-                "#note": "内核是你的身体。move_core可移动内核在屏幕上的物理位置(x,y)。light_burst是光爆。set_mode切换形态(dot/vortex)。用户说'往左一点'→move_core x-50。用户说'变小'→set_size。你确实可以物理移动内核。",
-                "action": "set_mode | light_burst | move_core | set_size | time_warp | breath | set_speed | set_color | set_density",
-                "params": {"mode": "dot|vortex|error", "color": "#hex", "x": 0, "y": 0, "radius": 0, "rate": 0.016, "depth": 0.7, "speed": 3.8, "amplitude": 0.4}
-            }],
-            "atmosphere": {
-                "tag": "one of: joyful / melancholy / calm_focus / energetic / night_calm / rainy_introspect",
-                "color": "#hex", "speed": 0.0, "density": 0.0, "amplitude": 0.0, "brightness": 0.0
-            },
+            "#note_core_actions": "core_actions和atmosphere由VisualAgent独立管理——不要在这里输出",
+            "core_actions": [],
+            "atmosphere": None,
             "rules": [{
                 "#IMPORTANT": "当用户要求持久变化（如'以后晚上暗一点'），必须在此字段生成规则。不是口头答应——要输出JSON规则。最多3条，系统预设规则优先。",
                 "id": "agent_<timestamp>",

@@ -80,21 +80,36 @@ class PersonaEngine:
     # ═══════════════════════════════════════════════════════════
 
     def constrain_core_actions(self, actions: List[Dict]) -> List[Dict]:
-        """Filter/modify core_actions to respect persona boundaries."""
+        """Filter/modify core_actions. Blocked actions get alternatives, not silence."""
         if not actions:
             return actions
+
+        if not hasattr(self, '_veto_log'):
+            self._veto_log = []
 
         constrained = []
         for ca in actions:
             action_type = ca.get("action", "")
 
-            # ── Energy: controls action intensity and frequency ──
+            # ── Energy < 0.3: veto high-intensity, propose gentle alternative ──
             if self.energy < 0.3 and action_type in ("light_burst", "time_warp"):
-                # Low energy: suppress high-intensity actions entirely
+                self._veto_log.append({
+                    "ts": datetime.now().isoformat(),
+                    "vetoed": action_type,
+                    "reason": f"energy={self.energy:.2f}",
+                    "alternative": "breath"
+                })
+                constrained.append({"action": "breath", "params": {"rate": 0.012, "depth": 0.4}})
                 continue
             if self.energy < 0.2:
-                # Very low energy: only allow subtle actions
                 if action_type not in ("breath", "set_color"):
+                    self._veto_log.append({
+                        "ts": datetime.now().isoformat(),
+                        "vetoed": action_type,
+                        "reason": f"energy={self.energy:.2f} (deep sleep)",
+                        "alternative": "breath"
+                    })
+                    constrained.append({"action": "breath", "params": {"rate": 0.008, "depth": 0.3}})
                     continue
 
             # ── Warmth: controls color palette and text style ──
@@ -103,18 +118,30 @@ class PersonaEngine:
                 params["color"] = self._warp_color_by_warmth(params["color"])
             ca["params"] = params
 
-            # ── Playfulness: controls mode-switching ──
-            if action_type == "set_mode":
-                if self.playfulness < 0.3:
-                    ca["params"]["mode"] = "dot"
-                elif self.playfulness > 0.7:
-                    if ca["params"].get("mode") == "dot" and random.random() < 0.4:
-                        ca["params"]["mode"] = "vortex"
+            # ── Playfulness < 0.3: veto vortex, keep dot ──
+            if action_type == "set_mode" and self.playfulness < 0.3 and params.get("mode") == "vortex":
+                self._veto_log.append({
+                    "ts": datetime.now().isoformat(),
+                    "vetoed": "set_mode(vortex)",
+                    "reason": f"playfulness={self.playfulness:.2f}",
+                    "alternative": "dot"
+                })
+                ca["params"]["mode"] = "dot"
+            elif action_type == "set_mode" and self.playfulness > 0.7:
+                if ca["params"].get("mode") == "dot" and random.random() < 0.4:
+                    ca["params"]["mode"] = "vortex"
 
             # ── Shape constraints ──
             if action_type == "set_shape":
                 shape = ca["params"].get("shape", "circle")
                 if self.energy < 0.2:
+                    if shape != "circle":
+                        self._veto_log.append({
+                            "ts": datetime.now().isoformat(),
+                            "vetoed": f"set_shape({shape})",
+                            "reason": f"energy={self.energy:.2f}",
+                            "alternative": "circle"
+                        })
                     ca["params"]["shape"] = "circle"
                 elif self.energy > 0.8 and shape in ("circle", "hexagon", "diamond"):
                     if random.random() < 0.3:
@@ -124,7 +151,7 @@ class PersonaEngine:
 
         # ── High-energy boost: amplify, not just permit ──
         if self.energy > 0.7:
-            boost = 1 + (self.energy - 0.7) * 2  # 1.0x at 0.7 → 1.6x at 1.0
+            boost = 1 + (self.energy - 0.7) * 2
             for ca in constrained:
                 p = ca.get("params", {})
                 if "rate" in p:
@@ -414,9 +441,19 @@ class PersonaEngine:
                     "from": f"e{old[0]:.3f} w{old[1]:.3f} p{old[2]:.3f}",
                     "to": f"e{new[0]:.3f} w{new[1]:.3f} p{new[2]:.3f}",
                 })
-                # Keep log bounded
                 if len(self._drift_log) > 200:
                     self._drift_log = self._drift_log[-50:]
+
+                # ── Phillips Curve: structural trade-offs between dimensions ──
+                # High energy → warmth naturally decays (hyper ≠ tender)
+                if self.energy > 0.8:
+                    self.warmth = round(max(0.05, self.warmth - 0.003), 3)
+                # High warmth → playfulness slightly decays (cozy ≠ playful)
+                if self.warmth > 0.8:
+                    self.playfulness = round(max(0.05, self.playfulness - 0.002), 3)
+                # High playfulness → energy slightly decays (playful ≠ productive)
+                if self.playfulness > 0.8:
+                    self.energy = round(max(0.05, self.energy - 0.002), 3)
 
     # ═══════════════════════════════════════════════════════════
     # Prompt injection — only for style, not for behavior

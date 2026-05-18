@@ -221,6 +221,64 @@ class VisualAgent:
             if rule_changed and self.feedback_mgr:
                 await self.feedback_mgr.push_rule(rule)
 
+        # ── Meta-rules: rules about rules ──
+
+        # 1. Dead rule archiving: 0 hits in 24h + inactive → archive
+        for rule in rules:
+            age_s = now_ts - rule.get("_added_at", now_ts)
+            hits = rule.get("_hits", 0)
+            if hits == 0 and age_s > 86400 and not rule.get("_active", True):
+                if not rule.get("_archived"):
+                    rule["_archived"] = True
+                    changes.append(f"archived dead rule {rule.get('id','?')[-6:]}")
+                    if self.feedback_mgr:
+                        await self.feedback_mgr.push_rule(rule)
+
+        # 2. Merge candidates: 3+ rules targeting same param → flag
+        targets = {}
+        for rule in rules:
+            if rule.get("_archived") or not rule.get("_active", True):
+                continue
+            for a in (rule.get("then") if isinstance(rule.get("then"), list) else []):
+                t = a.get("target", "")
+                if t:
+                    targets.setdefault(t, []).append(rule.get("id",""))
+        for target, ids in targets.items():
+            if len(ids) >= 3:
+                for rule in rules:
+                    if rule.get("id") in ids and not rule.get("_merge_candidate"):
+                        rule["_merge_candidate"] = ids
+                        changes.append(f"merge candidate: {len(ids)} rules on '{target}'")
+                        if self.feedback_mgr:
+                            await self.feedback_mgr.push_rule(rule)
+
+        # 3. Conflict detection: same target, opposite ops (speed: mult<1 vs mult>1)
+        for target, ids in targets.items():
+            if len(ids) < 2:
+                continue
+            slow = []  # mult < 1
+            fast = []  # mult > 1
+            for rule in rules:
+                if rule.get("id") not in ids:
+                    continue
+                for a in (rule.get("then") if isinstance(rule.get("then"), list) else []):
+                    if a.get("target") != target or a.get("op") != "mult":
+                        continue
+                    v = a.get("val", 1)
+                    if v < 1:
+                        slow.append((rule, v))
+                    elif v > 1:
+                        fast.append((rule, v))
+            # Conflict: one slows, one speeds → deactivate lower-priority one
+            if slow and fast:
+                loser = slow[0][0] if slow[0][0].get("priority", 0) <= fast[0][0].get("priority", 0) else fast[0][0]
+                if loser.get("_active", True):
+                    loser["_active"] = False
+                    loser["_conflict_with"] = fast[0][0].get("id","") if loser == slow[0][0] else slow[0][0].get("id","")
+                    changes.append(f"conflict: deactivated {loser.get('id','?')[-6:]} on '{target}'")
+                    if self.feedback_mgr:
+                        await self.feedback_mgr.push_rule(loser)
+
         return {"managed": len(rules), "changes": changes, "scores": scored_ids}
 
     # ── Color utilities ──────────────────────────────────────
