@@ -5,6 +5,7 @@ Wraps PersonaEngine for consistent personality constraints.
 """
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+import re
 
 
 class VisualAgent:
@@ -35,6 +36,8 @@ class VisualAgent:
             return self._autonomous_action()
         if task == "weather_blend":
             return self._weather_blend(ctx.get("atmosphere", {}))
+        if task == "manage_rules":
+            return await self._manage_rules(ctx.get("weather", {}))
         return {"error": f"VisualAgent: unknown task '{task}'"}
 
     # ── Atmosphere derivation ────────────────────────────────
@@ -105,6 +108,101 @@ class VisualAgent:
         return {"core_action": action} if action else {}
 
     # ── Weather blend standalone ─────────────────────────────
+
+    # ── Rule lifecycle management ────────────────────────────
+
+    async def _manage_rules(self, weather: Dict = None) -> Dict:
+        """Evaluate all active rules against persona + weather + time.
+        Suppress/boost/adjust rules without LLM. Called from atmosphere loop."""
+        from core.state_manager import get_agent_rules
+
+        rules = get_agent_rules()
+        if not rules:
+            return {"managed": 0, "changes": []}
+
+        now = datetime.now()
+        weather = weather or {}
+        changes = []
+
+        for rule in rules:
+            actions = rule.get("then", [])
+            if not isinstance(actions, list):
+                continue
+            rule_changed = False
+            cond = (weather.get("condition") or "").lower()
+            is_rain = any(w in cond for w in ("rain", "drizzle", "thunderstorm"))
+            is_cloudy = "cloud" in cond
+            is_deep_night = now.hour >= 23 or now.hour < 6
+            is_bright_day = 8 <= now.hour < 18 and "clear" in cond
+
+            for a in actions:
+                target = a.get("target", "")
+                val = a.get("val", 1)
+
+                # Low energy: suppress speed/brightness boosts
+                if self.persona.energy < 0.2:
+                    if target == "speed" and isinstance(val, (int, float)) and val > 1.0:
+                        rule["_active"] = False
+                        rule_changed = True
+                        changes.append(f"deactivated speed {val} (energy={self.persona.energy:.2f})")
+                    if target == "brightness" and isinstance(val, (int, float)) and val > 0.7:
+                        rule["_active"] = False
+                        rule_changed = True
+
+                # Rain/cloudy: warmify cool colors
+                if (is_rain or is_cloudy) and target == "color":
+                    if isinstance(val, str) and self._is_cool_color(val):
+                        a["val"] = self._warmify_color(val)
+                        rule_changed = True
+                        changes.append(f"warmed {val} → {a['val']} ({cond})")
+
+                # Deep night: cap speed, dim brightness
+                if is_deep_night:
+                    if target == "speed" and isinstance(val, (int, float)) and val > 0.8:
+                        a["_night_val"] = val
+                        a["val"] = round(val * 0.85, 2)
+                        rule.setdefault("endWhen", {"type": "time_gt", "val": "06:00"})
+                        rule_changed = True
+                        changes.append(f"night-capped speed {val} → {a['val']}")
+                    if target == "brightness" and isinstance(val, (int, float)) and val > 0.6:
+                        a["val"] = round(val * 0.7, 2)
+                        rule.setdefault("endWhen", {"type": "time_gt", "val": "06:00"})
+                        rule_changed = True
+
+                # Bright day: lift night caps
+                if is_bright_day and target == "speed" and rule.get("endWhen", {}).get("val") == "06:00":
+                    if "_night_val" in a:
+                        a["val"] = a.pop("_night_val")
+                    rule.pop("endWhen", None)
+                    rule_changed = True
+                    changes.append("lifted night speed cap")
+
+            if rule_changed and self.feedback_mgr:
+                await self.feedback_mgr.push_rule(rule)
+
+        return {"managed": len(rules), "changes": changes}
+
+    # ── Color utilities ──────────────────────────────────────
+
+    @staticmethod
+    def _is_cool_color(hex_color: str) -> bool:
+        """Check if a hex color is cool (blue-dominant, not near-black)."""
+        m = re.match(r'#?([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})', hex_color)
+        if not m:
+            return False
+        r, g, b = int(m.group(1), 16), int(m.group(2), 16), int(m.group(3), 16)
+        return b > r and b > g and b > 120
+
+    @staticmethod
+    def _warmify_color(hex_color: str) -> str:
+        """Shift a cool color toward warm by moving blue→red."""
+        m = re.match(r'#?([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})', hex_color)
+        if not m:
+            return hex_color
+        r, g, b = int(m.group(1), 16), int(m.group(2), 16), int(m.group(3), 16)
+        nr = min(255, r + int(b * 0.6))
+        nb = max(0, b - int(b * 0.5))
+        return f"#{nr:02x}{g:02x}{nb:02x}"
 
     def _weather_blend(self, atmosphere: Dict) -> Dict:
         """Apply weather adjustments to an existing atmosphere."""

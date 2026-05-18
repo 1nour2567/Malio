@@ -147,9 +147,16 @@ async def _atmosphere_loop():
                         scene_engine.get_weather_context(24.9175, 118.6465) or {}
                 except Exception:
                     _atmosphere_loop._cached_weather = getattr(_atmosphere_loop, '_cached_weather', {})
+                # Rule lifecycle: VisualAgent manages rules against persona+weather
+                try:
+                    result = await visual_agent._manage_rules(_atmosphere_loop._cached_weather or {})
+                    if result.get("changes"):
+                        print(f"[visual-agent] rules managed: {result['changes']}")
+                except Exception as e:
+                    print(f"[visual-agent] rule manage error: {e}")
             weather = getattr(_atmosphere_loop, '_cached_weather', {})
             atm = persona_engine.blend_weather(atm, weather)
-            await feedback_mgr.push_snapshot(atmosphere=atm)
+            await feedback_mgr.push_snapshot(atmosphere=atm, weather=weather if weather else None)
 
             # ── Autonomous behavior: probability engine (fast) ──
             auto = persona_engine.maybe_autonomous_action()
@@ -1057,6 +1064,15 @@ async def remove_song_from_playlist(playlist_id: str, song_id: str):
     finally: session.close()
 
 # ═══════════════════════════════════════════════════════════════
+# Dev — inject weather for testing
+# ═══════════════════════════════════════════════════════════════
+
+@app.post("/api/dev/inject-weather")
+async def inject_weather(weather: dict):
+    _atmosphere_loop._cached_weather = weather
+    return {"message": "weather injected", "weather": weather}
+
+# ═══════════════════════════════════════════════════════════════
 # Health check
 # ═══════════════════════════════════════════════════════════════
 
@@ -1109,7 +1125,8 @@ async def websocket_stream(websocket: WebSocket):
                     await feedback_mgr.push_snapshot(
                         song=ps["current"] if ps["current"] else None,
                         is_playing=ps["is_playing"],
-                        playlist=ps["playlist"])
+                        playlist=ps["playlist"],
+                        weather=getattr(_atmosphere_loop, '_cached_weather', None))
 
                 elif action == "sync_playlist":
                     songs = data.get("songs", [])
@@ -1156,7 +1173,8 @@ async def websocket_stream(websocket: WebSocket):
                     l4_history.record(f"core_{evt.get('type','')}", evt.get("detail", {}))
 
                     ws_label = {"song_skip":"切歌","time_warp":"暂停粒子","search":"搜索","spin":"调音量",
-                                "core_drag":"拖拽内核","nebula_capture":"捕获歌曲"}.get(evt_type, evt_type)
+                                "core_drag":"拖拽内核","nebula_capture":"捕获歌曲",
+                                "core_release":"内核释放选歌"}.get(evt_type, evt_type)
 
                     if evt_type == "song_skip":
                         skipped = ps["current"]
