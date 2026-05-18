@@ -113,6 +113,7 @@ class MatrixRain {
     this._colsMid = [];
     this._colsNear = [];
     this.core = { x: 0, y: 0, r: 27, active: true };
+    this._targetCoreR = 27;  // lerp target for smooth size transitions
     this._breathPhase = 0;
     this._breathRate = 0.016;   // Agent-controllable
     this._breathDepth = 0.7;    // Agent-controllable
@@ -154,10 +155,17 @@ class MatrixRain {
     this._retVY = 0;
     this._homeX = this.core.x;
     this._homeY = this.core.y;
+    this._driftTargetX = null;  // easeOut target for move_core
+    this._driftTargetY = null;
+    this._driftStartX = 0;
+    this._driftStartY = 0;
+    this._driftStartTime = 0;
+    this._driftDuration = 2500;  // ms for move_core to reach target
     this.onSwipe = null;            // callback for swipe gesture
     this.onTimeWarp = null;         // callback for double-tap pause
     this.onCaptureComplete = null;  // callback for nebula capture → playlist
     this.onCoreRelease = null;     // callback for reverse embodiment: core position → music
+    this.onRuleFeedback = null;    // callback for rule health → WebSocket → LLM
     /* audio reactivity */
     this._audio = { bass: 0, mid: 0, treble: 0, beat: 0 };
     /* search mode */
@@ -169,6 +177,7 @@ class MatrixRain {
     this._shapeTarget = 'circle';     /* morph target */
     this._shapeMorphT = 1;            /* morph progress 0→1 */
     this._shapeFromVerts = null;      /* snapshot of vertices at morph start */
+    this._coreAngle = 0;              /* slow continuous rotation (rad) */
     /* particle memory — interaction fingerprint */
     this._memory = this._loadMemory();
     this._memoryDirty = false;
@@ -498,8 +507,53 @@ class MatrixRain {
   }
 
   _buildShapeVerts (shape, radius, cx, cy) {
-    const n = 80;  // vertex count
+    const n = 80;
     const pts = [];
+
+    // ── Heart: parametric equation for correct ❤️ shape ──
+    if (shape === 'heart') {
+      // Classic parametric heart: point at bottom, cleft at top
+      // x(t) = 16 sin³(t), y(t) = 13 cos(t) - 5 cos(2t) - 2 cos(3t) - cos(4t)
+      let maxDist = 0;
+      const raw = [];
+      for (let i = 0; i < n; i++) {
+        const t = (i / n) * Math.PI * 2;
+        const sx = 16 * Math.pow(Math.sin(t), 3);
+        const sy = -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t));
+        // sy is negated: point at bottom, cleft at top
+        raw.push({ x: sx, y: sy });
+        const d = Math.sqrt(sx * sx + sy * sy);
+        if (d > maxDist) maxDist = d;
+      }
+      // Normalize to radius and offset
+      const scale = radius / maxDist;
+      for (let i = 0; i < n; i++) {
+        pts.push({ x: cx + raw[i].x * scale, y: cy + raw[i].y * scale });
+      }
+      return pts;
+    }
+
+    // ── Drop: teardrop parametric ──
+    if (shape === 'drop') {
+      let maxDist = 0;
+      const raw = [];
+      for (let i = 0; i < n; i++) {
+        const t = (i / n) * Math.PI * 2;
+        // Teardrop: (cos(t), sin(t) * (1 - 0.5 * cos(t))) — pointy at top
+        const sx = Math.cos(t);
+        const sy = Math.sin(t) * (1 - 0.45 * Math.cos(t)); // round bottom, narrower top
+        raw.push({ x: sx, y: sy });
+        const d = Math.sqrt(sx * sx + sy * sy);
+        if (d > maxDist) maxDist = d;
+      }
+      const scale = radius / maxDist;
+      for (let i = 0; i < n; i++) {
+        pts.push({ x: cx + raw[i].x * scale, y: cy + raw[i].y * scale });
+      }
+      return pts;
+    }
+
+    // Default: polar sampling
     for (let i = 0; i < n; i++) {
       const theta = (i / n) * Math.PI * 2;
       const r = radius * this._shapeRadius(shape, theta);
@@ -584,10 +638,15 @@ class MatrixRain {
     catch (e) { /* storage full or unavailable */ }
   }
 
+  setCurrentSongEWD (energy, warmth, density) {
+    this._currentSongEWD = { energy: energy, warmth: warmth, density: density };
+  }
+
   setSongLibrary (songs) {
     this._infoChars = [];  // each entry = char[] (full title as phrase)
     this._infoTags = [];
     this._songData = {};   /* song_id → {energy, warmth, density, title} */
+    this._currentSongEWD = null;  /* currently playing song E/W/D for capture filtering */
     if (!songs || !songs.length) return;
     for (const s of songs) {
       const title = s.title || '';
@@ -606,9 +665,37 @@ class MatrixRain {
 
   _infoChar () {
     if (this._infoChars.length === 0) return null;
-    // During summon: dramatically boost info particle spawn rate for capture
-    const spawnChance = (this._summonActive || (this._nebula && this._nebula.active)) ? 0.25 : 0.03;
-    if (Math.random() < spawnChance) {
+    if (Math.random() < 0.04) {
+      const isSummon = this._summonActive || (this._nebula && this._nebula.active);
+      // During summon: filter by E/W/D similarity to current song
+      if (isSummon && this._currentSongEWD) {
+        const cur = this._currentSongEWD;
+        const threshold = 0.3;  // max E/W/D distance for similarity
+        const candidates = [];
+        for (let j = 0; j < this._infoTags.length; j++) {
+          const sd = this._songData[this._infoTags[j]];
+          if (!sd) continue;
+          const de = (sd.energy || 0.5) - (cur.energy || 0.5);
+          const dw = (sd.warmth || 0.5) - (cur.warmth || 0.5);
+          const dd = (sd.density || 0.5) - (cur.density || 0.5);
+          const dist = Math.sqrt(de*de + dw*dw + dd*dd) / Math.sqrt(3);
+          if (dist < threshold) candidates.push(j);
+        }
+        // Fall back to full pool if no similar songs
+        const pool = candidates.length > 0 ? candidates :
+          Array.from({length: this._infoTags.length}, function(_, k) { return k; });
+        const idx = pool[Math.floor(Math.random() * pool.length)];
+        const tag = this._infoTags[idx];
+        const sd = this._songData[tag] || {};
+        return {
+          chars: this._infoChars[idx], tag: tag,
+          energy: sd.energy != null ? sd.energy : 0.5,
+          warmth: sd.warmth != null ? sd.warmth : 0.5,
+          density: sd.density != null ? sd.density : 0.5,
+          title: sd.title || ''
+        };
+      }
+      // Normal mode: random from full pool
       const i = Math.floor(Math.random() * this._infoChars.length);
       const tag = this._infoTags[i];
       const sd = this._songData[tag] || {};
@@ -846,6 +933,29 @@ class MatrixRain {
     const _gg = parseInt(tc.replace('#', '').substring(2, 4), 16);
     const _bb = parseInt(tc.replace('#', '').substring(4, 6), 16);
 
+    // ── move_core drift: easeInOut toward target, then spring back ──
+    if (this._driftTargetX != null) {
+      const elapsed = performance.now() - this._driftStartTime;
+      const duration = this._driftDuration;
+      if (elapsed >= duration) {
+        // Arrived at target — trigger return to home
+        this.core.x = this._driftTargetX;
+        this.core.y = this._driftTargetY;
+        this._driftTargetX = null;
+        this._driftTargetY = null;
+        this._returning = true;
+        this._retVX = 0;
+        this._retVY = 0;
+        this._settled = false;
+      } else {
+        // easeInOutSine: smooth acceleration then deceleration
+        const t = elapsed / duration;
+        const eased = 0.5 - 0.5 * Math.cos(Math.PI * t); // easeInOutSine
+        this.core.x = this._driftStartX + (this._driftTargetX - this._driftStartX) * eased;
+        this.core.y = this._driftStartY + (this._driftTargetY - this._driftStartY) * eased;
+      }
+    }
+
     // Emotional return physics — core drifts back to home after drag
     if (this._returning && !this._dragging) {
       const dx = this._homeX - this.core.x;
@@ -884,16 +994,15 @@ class MatrixRain {
     this._prevCoreY = this.core.y;
     this._rippleTimer += 1;
     // Spawn ripple when core moves fast enough, max every 3 frames
-    if (coreSpeed > 0.4 && this._rippleTimer > 3) {
+    if (coreSpeed > 0.15 && this._rippleTimer > 3) {
       this._rippleTimer = 0;
       this._ripples.push({
         x: this.core.x, y: this.core.y,
-        r: this.core.r * 0.6,       // start at core edge
-        maxR: this.core.r * 0.6 + coreSpeed * 35,  // bigger ripple for faster movement
-        alpha: Math.min(0.2, coreSpeed * 0.04),     // brighter for faster
+        r: this.core.r * 0.6,
+        maxR: Math.max(40, this.core.r * 0.6 + coreSpeed * 35),  // min visible size
+        alpha: Math.max(0.08, Math.min(0.2, coreSpeed * 0.05)),   // min alpha for slow moves
         birth: performance.now()
       });
-      // Cap total ripples
       if (this._ripples.length > 12) this._ripples.shift();
     }
 
@@ -1107,15 +1216,14 @@ class MatrixRain {
           if (c.tick > 40 + Math.floor(Math.random() * 50)) {
             c.tick = 0;
             const info = this._infoChar();
-            const isSummon = this._summonActive || (this._nebula && this._nebula.active);
-            if (info && !isSummon && this._infoCols.has(col)) { /* column occupied — stay random */ }
+            if (info && this._infoCols.has(col)) { /* column occupied — stay random */ }
             else if (info) {
               if (c._tag) this._infoCols.delete(col);
               c.char = info.chars; c._tag = info.tag;
               c._ewd = { energy: info.energy, warmth: info.warmth, density: info.density };
               c._rgb = ewdToRgb(info.energy, info.warmth, info.density);
               c._infoSpeedMul = 1.15 + Math.random() * 0.15;
-              if (!isSummon) this._infoCols.add(col);  // don't block column during summon
+              this._infoCols.add(col);
             } else {
               if (c._tag) this._infoCols.delete(col); // was info, now normal
               c.char = randChars(); c._tag = null; c._ewd = null; c._rgb = null; c._infoSpeedMul = 0;
@@ -1136,14 +1244,13 @@ class MatrixRain {
               // Normal particle: immediate respawn in same column
               c.y -= h + stream.length * CHAR_GAP + 20;
               const info2 = Math.random() < 0.5 ? this._infoChar() : null;
-              const isSummon2 = this._summonActive || (this._nebula && this._nebula.active);
-              if (info2 && !isSummon2 && this._infoCols.has(col)) { /* column occupied */ }
+              if (info2 && this._infoCols.has(col)) { /* column occupied */ }
               else if (info2) {
                 c.char = info2.chars; c._tag = info2.tag;
                 c._ewd = { energy: info2.energy, warmth: info2.warmth, density: info2.density };
                 c._rgb = ewdToRgb(info2.energy, info2.warmth, info2.density);
                 c._infoSpeedMul = 1.15 + Math.random() * 0.15;
-                if (!isSummon2) this._infoCols.add(col);
+                this._infoCols.add(col);
               } else { c.char = randChars(); c._tag = null; c._ewd = null; c._rgb = null; c._infoSpeedMul = 0; }
               c.tick = 0;
             }
@@ -1201,8 +1308,7 @@ class MatrixRain {
 
         // Luminance gradient
         const memoryBoost = 1 + Math.min(0.5, (c.mem || 0) * 0.05);
-        const isSummon = this._summonActive || (this._nebula && this._nebula.active);
-        const infoBoost = c._tag ? (isSummon ? 3.0 : 1.15) : 1.0;
+        const infoBoost = c._tag ? 1.15 : 1.0;
         let yBright = (0.65 + 0.35 * Math.min(1, c.y / h)) * infoBoost * warpBoost * memoryBoost;
         if (c._wbright) yBright *= Math.min(2, c._wbright);
         const depthBright = layer.brightness * layerFade;
@@ -1272,8 +1378,16 @@ class MatrixRain {
 
     // Core lens — nearly invisible, perceived only through refraction
     if (this.core.active) {
+      // Smooth radius transition: lerp toward target
+      if (Math.abs(this.core.r - this._targetCoreR) > 0.1) {
+        this.core.r += (this._targetCoreR - this.core.r) * 0.04;  // ~2.5s to settle
+      } else {
+        this.core.r = this._targetCoreR;
+      }
       /* search mode: core shrinks to 20 over 0.3s */
-      let coreR = this.core.r * (1 + 0.12 * this._breathDepth * Math.sin(this._breathPhase));
+      // Main breath + micro-tremor: two superimposed oscillations for "alive" feel
+      const microTremor = 0.02 * Math.sin(performance.now() / 800);  // fast, subtle
+      let coreR = this.core.r * (1 + 0.12 * this._breathDepth * Math.sin(this._breathPhase) + microTremor);
       if (this._searchMode) {
         const targetR = 20;
         coreR += (targetR - coreR) * 0.12;
@@ -1289,6 +1403,20 @@ class MatrixRain {
       }
 
       const isCircle = this._coreShape === 'circle' && this._shapeMorphT >= 1;
+
+      // ── Slow continuous rotation: all shapes spin gently ──
+      this._coreAngle += 0.004;  // ~0.24 rad/s, full rotation ~26s
+      if (this._coreAngle > Math.PI * 2) this._coreAngle -= Math.PI * 2;
+
+      // Apply rotation to shape ring + lens (vortex/error use ctx.arc, skip)
+      const applyRotation = !isCircle || mode === 'dot';
+      if (applyRotation) {
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(this._coreAngle);
+        ctx.translate(-cx, -cy);
+      }
+
       /* ── vortex mode: spinning ring particles ────────── */
       if (mode === 'vortex' && !this._timeWarp && isCircle) {
         ctx.strokeStyle = this._targetParams.color || '#22C55E';
@@ -1552,6 +1680,16 @@ class MatrixRain {
           ctx.fill();
         }
 
+        // Rotating highlight arc: makes circle rotation visible
+        if (isCircle && mode === 'dot') {
+          const ha = 0;  // fixed angle in rotated frame → orbits with core
+          ctx.beginPath();
+          ctx.arc(cx, cy, cr - 1, ha - 0.35, ha + 0.35);
+          ctx.strokeStyle = 'rgba(' + rr + ',' + gg + ',' + bb + ',0.25)';
+          ctx.lineWidth = 2.5;
+          ctx.stroke();
+        }
+
         // Lens gradient fill
         const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, cr);
         grad.addColorStop(0, `rgba(${rr},${gg},${bb},0.04)`);
@@ -1561,6 +1699,10 @@ class MatrixRain {
         ctx.beginPath();
         ctx.arc(cx, cy, cr, 0, Math.PI * 2);
         ctx.fill();
+      }
+      // Restore rotation transform for shape rendering
+      if (applyRotation) {
+        ctx.restore();
       }
     }
 

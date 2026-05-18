@@ -166,6 +166,7 @@ async def _atmosphere_loop():
             print(f"[atmosphere-loop] {e}")
 
 _LAST_DISTILL = None
+_rule_feedback_cache = []  # OODA loop: rule health reports from frontend DSL engine
 
 async def _distill_loop():
     global _LAST_DISTILL
@@ -1158,6 +1159,16 @@ async def websocket_stream(websocket: WebSocket):
                             import time as _time
                             _hb_last.clear()
                         websocket_stream._hb_tracker = _hb_last
+
+                elif action == "rule_feedback":
+                    # OODA loop: DSL engine reports rule health back to LLM
+                    global _rule_feedback_cache
+                    rules_data = data.get("rules", [])
+                    if rules_data:
+                        _rule_feedback_cache.extend(rules_data)
+                        if len(_rule_feedback_cache) > 200:
+                            _rule_feedback_cache = _rule_feedback_cache[-100:]
+                        sys.stderr.write(f"[rule-feedback] {len(rules_data)} rules, cache={len(_rule_feedback_cache)}\n")
 
                 elif action == "core_event":
                     evt = data.get("event", {})
