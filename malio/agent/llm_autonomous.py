@@ -198,8 +198,10 @@ class LLMAutonomous:
             fatigue_hint = ""
             if getattr(self._persona, '_skip_fatigue', False):
                 skips = len(getattr(self._persona, '_skip_timestamps', []))
+                skip_24h = getattr(self._persona, '_skip_24h_count', 0)
+                spiral = "【长期螺旋警告】" if skip_24h >= 30 else ""
                 fatigue_hint = (
-                    f"【紧急】用户在过去2分钟内连续切歌{skips}次。"
+                    f"【紧急】用户在过去2分钟内连续切歌{skips}次。{spiral}\n"
                     f"你的推荐方向可能有问题——不要再继续当前策略。"
                     f"建议切换风格、能量区间、或主动询问用户偏好。\n"
                 )

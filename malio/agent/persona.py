@@ -33,8 +33,10 @@ class PersonaEngine:
         self.playfulness = 0.5  # 0=serious      1=playful
 
         # ── Skip fatigue tracking ────────────────────────────
-        self._skip_timestamps: List[float] = []  # recent skip times
+        self._skip_timestamps: List[float] = []  # recent skip times (2min window)
         self._skip_fatigue = False  # true when user is rapid-skipping
+        self._skip_24h_count = 0    # cumulative skips in 24h for spiral detection
+        self._skip_24h_reset = 0.0  # timestamp when 24h counter was last reset
 
         # ── Drift parameters ────────────────────────────────
         self._drift_rate = 0.008       # max drift per event
@@ -381,11 +383,22 @@ class PersonaEngine:
             cutoff = now_ts - 120
             self._skip_timestamps = [t for t in self._skip_timestamps if t > cutoff]
             recent = len(self._skip_timestamps)
+            # 24h cumulative spiral detection
+            now_ts_24h = __import__('time').time()
+            if now_ts_24h - self._skip_24h_reset > 86400:
+                self._skip_24h_count = 0
+                self._skip_24h_reset = now_ts_24h
+            self._skip_24h_count += 1
+
             if recent >= 5:
                 self._skip_fatigue = True
                 reason = f"用户连续快速切歌({recent}次/2min)——跳过warmth衰减"
                 delta_e = self._drift_rate * 0.25
-                # Do NOT decay warmth — AI should question its strategy, not punish user
+            elif self._skip_24h_count >= 30:
+                # Chronic spiral: ≥30 skips in 24h → signal strategy failure
+                self._skip_fatigue = True
+                reason = f"24h累计切歌{self._skip_24h_count}次——可能陷入长期螺旋，建议LLM审查策略"
+                delta_e = self._drift_rate * 0.25
             else:
                 self._skip_fatigue = False
                 delta_e = self._drift_rate * 0.25
