@@ -32,6 +32,10 @@ class PersonaEngine:
         self.warmth = 0.6       # 0=distant      1=intimate
         self.playfulness = 0.5  # 0=serious      1=playful
 
+        # ── Skip fatigue tracking ────────────────────────────
+        self._skip_timestamps: List[float] = []  # recent skip times
+        self._skip_fatigue = False  # true when user is rapid-skipping
+
         # ── Drift parameters ────────────────────────────────
         self._drift_rate = 0.008       # max drift per event
         self._natural_decay = 0.02     # per hour toward baseline (faster recovery)
@@ -370,8 +374,23 @@ class PersonaEngine:
         delta_e, delta_w, delta_p = 0.0, 0.0, 0.0
 
         if event_type == "song_skip":
-            delta_e = self._drift_rate * 0.25   # 切歌 = 探索新歌，微涨能量
-            reason = "用户切歌"
+            # Skip fatigue: >=5 skips in 120s → pause warmth decay
+            now_ts = __import__('time').time()
+            self._skip_timestamps.append(now_ts)
+            # Trim old entries (>120s)
+            cutoff = now_ts - 120
+            self._skip_timestamps = [t for t in self._skip_timestamps if t > cutoff]
+            recent = len(self._skip_timestamps)
+            if recent >= 5:
+                self._skip_fatigue = True
+                reason = f"用户连续快速切歌({recent}次/2min)——跳过warmth衰减"
+                delta_e = self._drift_rate * 0.25
+                # Do NOT decay warmth — AI should question its strategy, not punish user
+            else:
+                self._skip_fatigue = False
+                delta_e = self._drift_rate * 0.25
+                delta_w = -self._drift_rate * 0.25
+                reason = "用户切歌"
         elif event_type == "core_drag":
             delta_p = -self._drift_rate * 0.8    # being dragged → less playful
             reason = "用户拖拽内核"

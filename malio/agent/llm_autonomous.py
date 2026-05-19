@@ -194,6 +194,16 @@ class LLMAutonomous:
             except Exception:
                 pass
 
+            # Skip fatigue signal: advise LLM to change strategy
+            fatigue_hint = ""
+            if getattr(self._persona, '_skip_fatigue', False):
+                skips = len(getattr(self._persona, '_skip_timestamps', []))
+                fatigue_hint = (
+                    f"【紧急】用户在过去2分钟内连续切歌{skips}次。"
+                    f"你的推荐方向可能有问题——不要再继续当前策略。"
+                    f"建议切换风格、能量区间、或主动询问用户偏好。\n"
+                )
+
             # Monetary policy transparency: show recent persona drift to LLM
             drift_hint = ""
             try:
@@ -217,7 +227,7 @@ class LLMAutonomous:
                 + "\n".join(lines[-10:]) + "\n\n"
                 f"现在是{now.strftime('%H:%M')}，{tod}。\n"
                 f"你的状态: energy={p.energy:.2f} warmth={p.warmth:.2f} playfulness={p.playfulness:.2f}\n"
-                + history_hint + veto_hint + rule_health_hint + l3_hint + drift_hint +
+                + history_hint + fatigue_hint + veto_hint + rule_health_hint + l3_hint + drift_hint +
                 f"你有两个选择：\n"
                 f"1. 如果你发现了用户的稳定行为模式（例如深夜总是听安静的、某种天气下偏好某类歌），"
                 f"写一条持久规则。输出rule JSON：\n"
