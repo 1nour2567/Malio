@@ -241,6 +241,21 @@ class Pipeline:
                 request.input, perception_ctx=perception_ctx)
         else:
             reasoner_result = await _react_loop(self, perception_ctx, request.input)
+        # Sanitize: strip undefined fields from LLM output (JSON injection defense)
+        ALLOWED = {"intent","reasoning","response","selected_song_id","actions",
+                   "core_actions","atmosphere","rules","_react_songs"}
+        for k in list(reasoner_result.keys()):
+            if k not in ALLOWED and not k.startswith("_"):
+                import sys; sys.stderr.write(f"[pipeline] stripped injected field: {k}\n")
+                del reasoner_result[k]
+            # Strip injected fields inside core_actions (if LLM tried to hide them)
+            if k == "core_actions" and isinstance(reasoner_result[k], list):
+                for ca in reasoner_result[k]:
+                    if isinstance(ca, dict) and ca.get("action") not in (
+                        "set_mode","light_burst","move_core","set_size","time_warp",
+                        "breath","set_speed","set_color","set_density","set_shape"):
+                        ca["action"] = "breath"  # force-safe fallback
+
         agent_log = reasoner_result.get("reasoning", "")
         response_text = reasoner_result.get("response", "好的，让我为您推荐一些音乐。")
 
