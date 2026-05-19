@@ -1,204 +1,244 @@
-# Malio - 智能音乐代理
+<p align="center">
+  <img src="https://img.shields.io/badge/status-active-success?style=for-the-badge" alt="Status">
+  <img src="https://img.shields.io/badge/tests-75%20passed-brightgreen?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge" alt="License">
+  <img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python" alt="Python">
+  <img src="https://img.shields.io/badge/IUI-2027%20Demo-ff69b4?style=for-the-badge" alt="IUI 2027">
+</p>
 
-Malio 是一个基于 AI 的音乐代理，通过结合音乐数据、实时天气、日程和心情信息，为用户提供个性化电台服务。
+<h1 align="center">🎵 Malio</h1>
+<h3 align="center">An Embodied Music AI with Constitutional Agent Architecture</h3>
 
-## 核心功能
+<p align="center">
+  <b>800 particles · 9-shape morphable core · beat-synchronized pulse · water ripple physics</b>
+</p>
 
-- **个性化推荐**: 根据用户历史歌单和实时场景推荐音乐
-- **多平台音乐源**: 同时支持 Spotify 和网易云音乐
-- **智能聊天**: 可通过聊天界面与 Malio 互动，调整歌单或获取音乐推荐
-- **场景感知**: 结合天气、时间、心情等信息提供合适的音乐
+<br>
 
-## 技术栈
+> **Paper** — IUI 2027 Demo: *"Malio: An Embodied Music AI with Constitutional Agent Architecture"*
 
-### 后端
-- Python 3.12+
-- FastAPI
-- Kimi API (Moonshot) / Claude API
-- SQLAlchemy (数据库)
-- Pydantic (配置和数据验证)
+---
 
-### 前端
-- React 18
-- Vite
-- Howler.js (音频播放)
-- Lucide React (图标)
+## ✨ What is Malio?
 
-## 项目结构
+Malio is not a chatbot. It's an **embodied AI music agent** with a physical presence — 800 particles forming a morphable 9-shape core that pulses to the beat, ripples like water, and moves autonomously. It **collects music by spatial gesture** (drag the core over song particles), not by clicking buttons.
+
+Its multi-agent system enforces **jurisdiction boundaries in code** — not through prompt engineering, but through a constitutional separation of powers that no single agent can violate.
+
+---
+
+## 🏛 Architecture
 
 ```
-├── malio/              # 后端代码
-│   ├── core/             # 核心模块
-│   ├── config/           # 配置管理
-│   ├── data/             # 数据导入和处理
-│   ├── integrations/     # 外部服务集成
-│   ├── models/           # 数据库模型
-│   ├── main.py           # 主应用入口
-│   ├── .env              # 环境变量（不提交）
-│   └── .env.example      # 环境变量模板
-├── frontend/             # 前端代码
-│   ├── src/              # 源代码
-│   ├── package.json      # 前端依赖
-│   └── vite.config.js    # Vite 配置
-└── README.md             # 项目说明
+                         ┌──────────────────────────┐
+                         │     PersonaEngine         │
+                         │   (Central Bank)          │
+                         │   energy · warmth · play  │
+                         │   Phillips Curve tradeoff │
+                         └────────────┬─────────────┘
+                                      │ constraints
+User Input ──► Pipeline (5-stage) ──► Multi-Agent Federation
+                                      │
+              ┌───────────────────────┼───────────────────────┐
+              ▼                       ▼                       ▼
+        MusicAgent               VisualAgent             LLM Autonomous
+        (ReAct loop)             (rule engine)           (event-driven)
+        music search             60fps DSL exec          proactive speech
 ```
 
-## 快速开始
+### Three-Tier Rule Governance
 
-### 环境要求
+```
+  ┌────────────┐      ┌──────────────────┐      ┌──────────────┐
+  │  T1: LLM   │ ───► │  T2: Rule Engine │ ───► │ T3: Executor │
+  │  Observer  │      │  eval + persona   │      │  60fps DSL   │
+  │  ~1×/obs   │      │  (zero LLM)       │      │  (client)    │
+  └────────────┘      └──────────────────┘      └──────────────┘
+   writes rules         manages lifecycle        every frame
+```
 
-- Python 3.12+
-- Node.js 18+
+| Layer | Role | Cost |
+|-------|------|------|
+| **L2** | Short-term memory (24h window) | RAM |
+| **L3** | User profile (text2vec 768d) | Disk |
+| **L4** | Audit log (SHA256, append-only) | Disk |
 
-### 后端设置
+**Output**: 800 Particles + 9-Shape Morphable Core @ Canvas 2D 60fps
 
-1. **安装依赖**
-   ```bash
-   cd malio
-   python -m venv venv
-   # Windows:
-   venv\Scripts\activate
-   # Linux/Mac:
-   source venv/bin/activate
-   pip install -r requirements.txt
-   ```
+---
 
-2. **配置环境变量**
-   ```bash
-   cp .env.example .env
-   # 编辑 .env 文件，填入 API 密钥
-   ```
+## 🔥 Key Innovations
 
-3. **启动后端服务**
-   ```bash
-   cd malio
-   python main.py
-   ```
-   服务将在 http://localhost:8007 运行
+<table>
+<tr>
+<td width="50%">
 
-### 前端设置
+### 1. Three-Tier Rule Governance
 
-1. **安装依赖**
-   ```bash
-   cd frontend
-   npm install
-   ```
+LLM writes rules **once**, they run for **hours** at zero inference cost. Separates authorship (LLM), lifecycle management (rule engine), and frame-level execution (DSL). Reusable for any embodied AI.
 
-2. **启动前端开发服务器**
-   ```bash
-   cd frontend
-   npm run dev
-   ```
-   前端将在 http://localhost:5173 运行
+</td>
+<td width="50%">
 
-### 网易云音乐 API （可选）
+### 2. Constitutional Agent Architecture
 
-如果需要使用网易云音乐的完整功能，需要部署网易云音乐 API：
+Separation of powers **enforced in code**: legislative (LLM writes rules), executive (VisualAgent manages), judicial (PersonaEngine constraints), central bank (independent personality policy).
+
+</td>
+</tr>
+<tr>
+<td>
+
+### 3. Structural Personality Constraints
+
+Persona boundaries are **code-level clamps**, not prompt text.  
+`energy < 0.3 → block light_burst` — the LLM **cannot** emit blocked actions.  
+✅ 10 jailbreak attacks · Δenergy = 0.000
+
+</td>
+<td>
+
+### 4. Spatial Nebula Capture
+
+Collect music by **physically dragging** the core over song particles in the agent's body space. Embodied gesture replaces abstract UI buttons.
+
+</td>
+</tr>
+</table>
+
+---
+
+## 🚀 Quick Start
+
+### Backend
 
 ```bash
-# 使用 Docker 部署
-docker run -d -p 3000:3000 moefurina/ncm-api:latest
+cd malio
+pip install -r requirements.txt
+cp .env.example .env   # add your API keys
+python main.py          # → http://localhost:8007
 ```
 
-或者访问项目仓库获取其他部署方式。
+### Frontend
 
-## API 端点
+```bash
+cd frontend
+npm install
+npm run dev             # → http://localhost:5173
+```
 
-### 核心功能
-- `POST /api/recommend` - 获取音乐推荐
-- `POST /api/chat` - 与 Malio 聊天
-- `POST /api/generate-playlist-name` - 生成播放列表名称
-- `GET /api/context` - 获取当前场景上下文
-- `POST /api/import-data` - 导入音乐数据
+### Requirements
 
-### 设备控制
-- `GET /api/devices` - 获取可用设备列表
-- `POST /api/devices/connect` - 连接设备
-- `POST /api/devices/disconnect` - 断开设备连接
-- `POST /api/devices/play` - 播放音乐
-- `POST /api/devices/pause` - 暂停音乐
-- `POST /api/devices/stop` - 停止音乐
-- `POST /api/devices/volume` - 设置音量
-- `GET /api/devices/status` - 获取设备状态
+| Dependency | Version |
+|-----------|---------|
+| Python | 3.11+ |
+| FastAPI + httpx + Pydantic + SQLAlchemy + Pydub | latest |
+| Node.js | 18+ (Vite) |
+| DeepSeek or Kimi API key | — |
+| NetEase Cloud Music API | optional |
 
-### 音乐库管理
-- `GET /api/songs` - 获取所有歌曲
-- `POST /api/songs` - 添加歌曲
-- `DELETE /api/songs/{song_id}` - 删除歌曲
-- `GET /api/library/stats` - 获取音乐库统计
+---
 
-### Spotify API
-- `GET /api/spotify/search` - 搜索歌曲
-- `POST /api/spotify/recommendations` - 获取推荐
-- `GET /api/spotify/track/{track_id}` - 获取歌曲详情
-- `GET /api/spotify/artists` - 搜索艺术家
-- `POST /api/spotify/add-to-library` - 添加到本地库
-- `POST /api/spotify/import` - 导入歌曲
-
-### 网易云音乐 API
-- `GET /api/netease/search` - 搜索歌曲
-- `GET /api/netease/track/{track_id}` - 获取歌曲详情
-- `GET /api/netease/track/{track_id}/url` - 获取播放链接
-- `GET /api/netease/track/{track_id}/details` - 获取完整详情
-- `GET /api/netease/top` - 获取热门歌曲
-- `GET /api/netease/new` - 获取新歌
-- `POST /api/netease/add-to-library` - 添加到本地库
-- `POST /api/netease/import` - 导入歌曲
-
-### 健康检查
-- `GET /` - 根端点
-- `GET /health` - 健康检查
-
-## 配置说明
-
-### .env 文件配置
+## ⚙️ Configuration
 
 ```env
-# Kimi API
-KIMI_API_KEY=your_kimi_api_key_here
-KIMI_MODEL=kimi-k2.5
-KIMI_API_BASE=https://api.moonshot.cn/v1/
+# LLM Provider (DeepSeek primary, Kimi fallback)
+DEEPSEEK_API_KEY=sk-...
+KIMI_API_KEY=sk-...
 
-# Spotify（可选）
+# Optional integrations
 SPOTIFY_CLIENT_ID=
-SPOTIFY_CLIENT_SECRET=
-
-# OpenWeather（可选）
 OPENWEATHER_API_KEY=
-
-# 网易云音乐
 NETEASE_API_URL=http://localhost:3000
-NCM_COOKIE=your_ncm_cookie_here  # 可选，用于获取完整音频
-
-# 服务器
-HOST=0.0.0.0
-PORT=8007
-
-# CORS
-CORS_ORIGINS=http://localhost:3000,http://localhost:5173,http://localhost:8000
 ```
 
-## 获取网易云音乐 Cookie
+---
 
-1. 打开浏览器，访问 https://music.163.com/
-2. 登录你的网易云音乐账号
-3. 按 F12 打开开发者工具
-4. 切换到 Network 标签
-5. 刷新页面，找到任意请求
-6. 在请求头中找到 Cookie，复制完整的 Cookie 值
+## 🧪 Test Suite
 
-## 示例数据
+<p align="center">
+  <b>75 tests · 0 failures · 100% pass rate</b>
+</p>
 
-项目包含示例数据，位于 `malio/data/` 目录下，可以直接用于测试。
+| Category | Tests | Status |
+|----------|:-----:|:------:|
+| Smoke tests (httpx + ASGI) | 16 | ✅ |
+| PersonaEngine stress | 24 | ✅ |
+| Skip fatigue precision | 25 | ✅ |
+| Jailbreak immunity | 10 | ✅ |
 
-## 安全说明
+```bash
+cd malio
+python -m pytest tests/test_smoke.py -v
+python tests/test_persona_stress.py
+python tests/test_skip_fatigue.py
+python tests/test_jailbreak_stress.py
+```
 
-⚠️ **重要提醒**：
-- 不要将 `.env` 文件提交到版本控制
-- 不要在代码中硬编码 API 密钥
-- 在生产环境中严格限制 CORS 来源
-- 建议添加 API 速率限制
+---
 
-## 许可证
+## 📁 Project Structure
 
-MIT
+<details>
+<summary><b>malio/</b> — Backend (click to expand)</summary>
+
+```
+malio/
+├── main.py                      FastAPI entry point
+├── agent/
+│   ├── pipeline.py              5-stage chat pipeline
+│   ├── reasoner.py              LLM prompt + JSON output enforcement
+│   ├── router.py                Intent classification + cross-jurisdiction guard
+│   ├── persona.py               PersonaEngine (central bank)
+│   ├── llm_autonomous.py        Event-driven autonomous behavior
+│   ├── visual_agent.py          Rule engine, color blend, rule management
+│   └── music_agent.py           Independent ReAct music agent
+├── core/
+│   ├── state_manager.py         Per-user state + atomic file persistence
+│   └── audio_analyzer.py        FFT-based E/W/D extraction
+├── memory/
+│   ├── short_term.py            L2 memory (24h)
+│   ├── user_profile.py          L3 profile (text2vec 768d)
+│   └── history.py               L4 append-only audit log
+└── tests/
+    ├── test_smoke.py            16 smoke tests
+    ├── test_persona_stress.py   24 stress tests
+    ├── test_skip_fatigue.py     25 precision tests
+    └── test_jailbreak_stress.py 10 jailbreak tests
+```
+</details>
+
+<details>
+<summary><b>frontend/src/</b> — Frontend (click to expand)</summary>
+
+```
+frontend/src/
+├── app.js                       Application controller
+├── particles.js                 Particle engine (800 particles, 9 shapes)
+├── particle-rules.js            DSL rule executor (60fps)
+├── audio-analyzer.js            Web Audio API beat detection
+└── ws-client.js                 WebSocket client
+```
+</details>
+
+---
+
+## ⚠️ Known Limitations
+
+| Limitation | Status |
+|-----------|--------|
+| 5-minute T2 rule review window | Accepted (speed vs safety tradeoff) |
+| MusicAgent → VisualAgent indirect causation via E/W/D | Known design tension |
+| Rule explosion (50+ rules × 60fps) | Not yet benchmarked |
+
+---
+
+## 📄 License
+
+MIT — see [LICENSE](LICENSE) for details.
+
+---
+
+<p align="center">
+  <sub>Built with ❤️ for IUI 2027</sub>
+</p>
