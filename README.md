@@ -30,12 +30,12 @@ Its multi-agent system enforces **jurisdiction boundaries in code** — not thro
 ## 🏛 Architecture
 
 ```
-                         ┌──────────────────────────┐
+                         ┌───────────────────────────┐
                          │     PersonaEngine         │
                          │   (Central Bank)          │
                          │   energy · warmth · play  │
                          │   Phillips Curve tradeoff │
-                         └────────────┬─────────────┘
+                         └────────────┬──────────────┘
                                       │ constraints
 User Input ──► Pipeline (5-stage) ──► Multi-Agent Federation
                                       │
@@ -51,8 +51,8 @@ User Input ──► Pipeline (5-stage) ──► Multi-Agent Federation
 ```
   ┌────────────┐      ┌──────────────────┐      ┌──────────────┐
   │  T1: LLM   │ ───► │  T2: Rule Engine │ ───► │ T3: Executor │
-  │  Observer  │      │  eval + persona   │      │  60fps DSL   │
-  │  ~1×/obs   │      │  (zero LLM)       │      │  (client)    │
+  │  Observer  │      │  eval + persona  │      │  60fps DSL   │
+  │  ~1×/obs   │      │  (zero LLM)      │      │  (client)    │
   └────────────┘      └──────────────────┘      └──────────────┘
    writes rules         manages lifecycle        every frame
 ```
