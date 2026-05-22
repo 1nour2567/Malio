@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Depends, Query, Response, WebSocket, WebSocketDisconnect, Request
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
@@ -35,6 +36,9 @@ from agent.music_agent import MusicAgent
 from agent.visual_agent import VisualAgent
 from agent.llm_autonomous import LLMAutonomous
 
+# Federation imports are lazy — model is heavy (~120MB), loaded on first use.
+# See POST /api/rules/import for the actual import.
+
 # Load .env file
 load_dotenv()
 
@@ -55,6 +59,22 @@ async def _start_bg():
     asyncio.create_task(_atmosphere_loop())
     asyncio.create_task(_distill_loop())
     asyncio.create_task(_persist_loop())
+    llm_auto.start_proactive()
+
+    # Federation sync — disabled by default (empty peers list)
+    peers = [p.strip() for p in settings.federation_peers.split(",") if p.strip()]
+    if peers:
+        from federation.sync import FederationSync
+        app.state.federation_sync = FederationSync(peers, settings.federation_sync_interval)
+        asyncio.create_task(app.state.federation_sync.start())
+        print(f"[federation] sync enabled, {len(peers)} peer(s), every {settings.federation_sync_interval}s")
+
+@app.on_event("shutdown")
+async def _stop_bg():
+    llm_auto.stop_proactive()
+    sync = getattr(app.state, "federation_sync", None)
+    if sync:
+        await sync.stop()
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -80,6 +100,17 @@ songs_dir = os.path.join(audio_dir, "songs")
 if not os.path.exists(songs_dir):
     os.makedirs(songs_dir)
 app.mount("/audio", StaticFiles(directory=audio_dir), name="audio")
+
+# Serve frontend (eliminates need for Vite dev server in dev)
+frontend_dir = os.path.join(os.path.dirname(__file__), "..", "frontend")
+if os.path.isdir(frontend_dir):
+    app.mount("/src", StaticFiles(directory=os.path.join(frontend_dir, "src")), name="frontend_src")
+    if os.path.isdir(os.path.join(frontend_dir, "public")):
+        app.mount("/public", StaticFiles(directory=os.path.join(frontend_dir, "public")), name="frontend_public")
+
+    @app.get("/")
+    async def index():
+        return FileResponse(os.path.join(frontend_dir, "index.html"))
 
 # ═══════════════════════════════════════════════════════════════
 # Initialize engines
@@ -120,7 +151,8 @@ pipeline = Pipeline(perception, router, reasoner, provider_registry, tool_regist
                     visual_agent=visual_agent)
 
 # ── LLM-driven autonomous behavior reactor ──
-llm_auto = LLMAutonomous(provider_registry, feedback_mgr, persona_engine)
+llm_auto = LLMAutonomous(provider_registry, feedback_mgr, persona_engine,
+                          l2_memory=l2_memory, scene_engine=scene_engine)
 
 # ═══════════════════════════════════════════════════════════════
 # Background loops
@@ -1106,32 +1138,77 @@ async def export_rules():
 
 @app.post("/api/rules/import")
 async def import_rules(body: dict):
-    """Import federated rules. Deduplicate, score-down foreign rules for observation."""
+    """Import federated rules with semantic deduplication and aggregation."""
+    import time as _time
     from core.state_manager import get_agent_rules, state_store
+    from federation.embedder import embed_single
+    from federation.aggregator import is_semantic_duplicate, aggregate, evolve_trust
+
     incoming = body.get("rules", [])
     if not incoming:
         return {"imported": 0, "duplicates": 0}
-    existing = get_agent_rules()
-    existing_conds = set()
-    for r in existing:
-        w = json.dumps(r.get("when", {}), sort_keys=True)
-        existing_conds.add(w)
 
-    imported, dupes = 0, 0
+    existing = get_agent_rules()
+    existing_vecs = [embed_single(r) for r in existing] if existing else []
+
+    # Strategy targets — rules with these don't use 'when' conditions
+    _STRATEGY_TARGETS = {"genre_boost", "genre_suppress", "energy_bias",
+                         "novelty_bias", "language_bias"}
+
+    imported, dupes, semantic_dupes = 0, 0, 0
     for r in incoming:
-        w = json.dumps(r.get("when", {}), sort_keys=True)
-        if w in existing_conds:
+        # Exact dedup: for strategy rules, match on then.target; for visual rules, match on when
+        is_strategy = any(
+            a.get("target") in _STRATEGY_TARGETS
+            for a in (r.get("then") if isinstance(r.get("then"), list) else [])
+        )
+        if is_strategy:
+            # Strategy rules: dedup by same target value
+            new_targets = {(a.get("target"), str(a.get("val"))) for a in r.get("then", [])}
+            exact_dup = any(
+                {(a.get("target"), str(a.get("val"))) for a in e.get("then", [])} == new_targets
+                for e in existing if e.get("then")
+            )
+        else:
+            w = json.dumps(r.get("when", {}), sort_keys=True)
+            exact_dup = any(
+                json.dumps(e.get("when", {}), sort_keys=True) == w
+                for e in existing
+            )
+        if exact_dup:
             dupes += 1
             continue
+
+        # Semantic path: near-duplicate detection
+        if existing_vecs and is_semantic_duplicate(r, existing_vecs, threshold=0.85):
+            semantic_dupes += 1
+            continue
+
         r["_source"] = "federated"
-        r["_score"] = (r.get("_score", 0.5) or 0.5) * 0.7  # observation period
+        r["_score"] = round((r.get("_score", 0.5) or 0.5) * 0.7, 3)
         r["_active"] = True
         r["_imported_at"] = dt.datetime.now().isoformat()
+        r["_imported_at_ts"] = int(_time.time())
         existing.append(r)
+        # Update vectors cache for subsequent semantic checks
+        existing_vecs.append(embed_single(r))
         imported += 1
 
+    # Aggregate + trust evolution
+    if imported > 0:
+        aggregated = aggregate(existing, min_samples=2)
+        evolve_trust(aggregated)
+        s = get_agent_rules(user_id="default")
+        s.clear()
+        s.extend(aggregated)
+
     state_store.mark_dirty("default")
-    return {"imported": imported, "duplicates": dupes}
+    return {
+        "imported": imported,
+        "duplicates": dupes,
+        "semantic_duplicates": semantic_dupes,
+        "total_rules_after_aggregation": len(aggregated) if imported > 0 else len(existing),
+    }
 
 # ═══════════════════════════════════════════════════════════════
 # Dev — inject weather for testing

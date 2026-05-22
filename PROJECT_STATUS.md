@@ -1,124 +1,169 @@
 # Malio AI Music 项目状态分析
 
-**分析时间**: 2026-05-13
-**注意**: 项目无 git 仓库，以下基于文件修改时间和内容对比分析。
+**分析时间**: 2026-05-18
+**Git 仓库**: 已初始化，12 commits
 
 ---
 
 ## 一、项目结构概览
 
 ```
-├── malio/              ← 当前后端（活跃开发中）
-├── malio_new/          ← 后端快照（5/12 17:05，已过时）
-├── frontend/           ← 当前前端（活跃开发中）
-├── frontend_new/       ← 前端快照（5/12 17:05，已过时）
-├── docs/superpowers/   ← 设计文档
-├── prompts/            ← AI prompt 模板
-├── user/               ← 用户配置
+├── malio/                  ← 后端（FastAPI + agent 系统）
+│   ├── agent/              ← 10 个 agent 模块
+│   ├── core/               ← 推荐引擎、场景感知、状态管理
+│   ├── integrations/       ← Kimi / NetEase / Spotify / ElevenLabs
+│   ├── memory/             ← L2 短期 / L3 偏好 / L4 长期
+│   ├── config/             ← 配置管理
+│   ├── data/               ← 数据导入
+│   ├── models/             ← SQLAlchemy 数据模型
+│   ├── tests/              ← 40 个测试（16 smoke + 24 单元）
+│   └── main.py             ← FastAPI 入口（1314 行，含全部路由）
+├── frontend/               ← 前端（vanilla JS/CSS 零框架）
+│   └── src/
+│       ├── app.js          ← 主逻辑（2031 行）
+│       ├── particles.js    ← 粒子系统
+│       ├── particle-rules.js ← DSL 规则引擎
+│       ├── ws-client.js    ← WebSocket 客户端
+│       ├── audio-analyzer.js ← 音频分析
+│       ├── color-extractor.js ← 封面颜色提取
+│       └── particles/
+│           └── nebula.js   ← 星云粒子
+├── docs/superpowers/
+│   ├── specs/              ← 4 个设计规范文档
+│   └── plans/              ← 阶段计划
+├── prompts/
+│   └── dj-persona.md       ← DJ 人格定义
+├── user/
+│   └── color-map.json      ← 情绪→颜色映射
+├── malio.db                ← SQLite 数据库
 ├── CLAUDE.md
 ├── MALIO_ARCHITECTURE.md
-└── START.md
+└── TEST_REPORT.md           ← 测试报告
 ```
-
-**关键发现**: `_new` 目录是 5/12 下午的快照，真正的开发继续在 `malio/` 和 `frontend/` 中进行。当前版本已经比快照版本多了大量改动。
 
 ---
 
-## 二、5月12日 ~ 13日 主要改动（按时间线）
+## 二、Git 提交历史
 
-### 2.1 前端粒子系统 — 重大重构
+```
+87387d4 fix: playlist delete + nebula capture + confirm bar
+22e4695 feat: Agent jurisdiction + proactive speech + rule governance
+2c7c9f2 feat: aliveness — core animation overhaul + rule OODA loop
+1feafb0 feat: reverse embodiment + nebula capture optimization
+dce6937 feat: embodiment v0.3 — shapes, beat pulse, ripples, LLM autonomous, bug fixes
+4f6ce4e feat: Malio v2.0 — Multi-Agent Embodied AI Music System
+7f39685 fix: idle timer wake-up transition always 30s due to assignment order
+791105f feat: L2 short-term memory + swipe rework
+7ba3edd fix: recommendation engine missing audio_path and preview_url
+8cb69e7 fix: playlist songs not playable due to innerHTML stripping event listeners
+6d1d42b feat: audio reactivity + particle rules DSL + core state machine
+73a7c3b Phase A-C: E/W/D classification + particle nebula + memory corridor
+```
 
-| 时间 | 文件 | 变更 |
-|------|------|------|
-| **5/13 02:34** | `frontend/src/particles.js` (30KB) | 最新的 Matrix Code Rain 实现，3 层深度视差、垂直亮度渐变、核心辉光 |
-| **5/12 17:43** | `frontend/src/particles/engine.js` (10KB) | **新增** — 模块化粒子引擎：512 粒子池、100 列网格、绕流物理、FPS 故障保护 |
-| 5/12 23:47 | `frontend/src/style.css` (19.4KB) | OLED 深色主题，设计 Token 系统 |
-| 5/12 23:38 | `frontend/index.html` (8.9KB) | 全屏播放器布局，粒子 canvas 背景，顶部栏 + 播放器卡片 |
+---
 
-**架构演进**: 粒子系统从单文件 `particles.js` 拆分为模块化结构 `particles/engine.js`（为后续拆分为 core.js、physics.js、gestures.js、effects.js、render.js 做准备）。
+## 三、当前开发阶段（已完成以 ✅ 标记）
 
-`particles/engine.js` 已实现:
-- 512 粒子池 + 100 可变间距列
-- 列弹簧物理（粒子恢复列 X 位置）
-- 绕流（flow-around）+ 消散（dissipation）
-- 轨迹 + 角色循环
-- FPS 故障保护（<30fps 禁用绕流）
+### Agent 系统
 
-### 2.2 前端 app.js — 主逻辑更新
-
-| 时间 | 文件 | 大小 |
-|------|------|------|
-| **5/13 02:00** | `frontend/src/app.js` | 41.8KB |
-| 5/12 17:05 | `frontend_new/src/app.js` | 58.8KB |
-
-当前版本比快照版本**小 17KB**，说明进行了精简重构。保留了核心状态管理、面板系统、WebSocket 通信。
-
-### 2.3 后端 Agent 系统 — reasoner 增强
-
-| 文件 | 变更 |
+| 组件 | 状态 |
 |------|------|
-| `malio/agent/reasoner.py` | 新增加载 `prompts/dj-persona.md` + `user/color-map.json` |
+| 5 阶段 Pipeline (Perception → Router → Reasoner → Tools → Feedback) | ✅ |
+| Router (Plan / Agent / YOLO 三种模式) | ✅ |
+| Reasoner (Plan-and-Solve + atmosphere JSON) | ✅ |
+| ToolRegistry (11 个注册工具) | ✅ |
+| Feedback (WebSocket 推送 + 快照) | ✅ |
+| MusicAgent (单职责音乐工作者) | ✅ |
+| VisualAgent (规则管理 + 评分 + 合并 + 冲突检测) | ✅ |
+| PersonaEngine (人格漂移 + 否决 + Phillips Curve) | ✅ |
+| LLMAutonomous (主动发言 + FOIA 审计 + 节流 + 禁言) | ✅ |
 
-reasoner 现在会自动加载 DJ 人格提示词和色彩映射配置，提供给 LLM 作为 atmosphere 输出的参考。
+### 记忆系统
 
-### 2.4 新增文件
-
-| 文件 | 用途 | 时间 |
-|------|------|------|
-| `prompts/dj-persona.md` (2.5KB) | Malio DJ 人格定义：5 条硬性规则、6 种 atmosphere 标签、色彩转场原则、回复语气规范 | 5/12 09:13 |
-| `user/color-map.json` (1.4KB) | 情绪→颜色映射：joyful/melancholy/calm_focus/energetic/night_calm/rainy_introspect，含时间规则 | 5/12 09:12 |
-| `docs/superpowers/specs/2026-05-12-malio-particle-body.md` (7.2KB) | 粒子身体架构设计：核心状态机、手势系统、特效编排、信息编码 | 5/12 17:31 |
-| `docs/superpowers/specs/2026-05-12-matrix-depth.md` (4.3KB) | 矩阵深度系统：双层视差、垂直亮度渐变、核心局部辉光 | 5/12 18:28 |
-| `docs/superpowers/specs/2026-05-12-core-expression.md` (4.5KB) | 核心表达系统：呼吸环、拖拽情绪回弹、音量/进度暂态环 | 5/12 20:33 |
-
-### 2.5 音乐文件下载
-
-5/12 23:22 ~ 23:31 下载了 **12 首歌曲**（MP3/FLAC），总大小约 105MB：
-
-| 文件 | 大小 |
+| 层级 | 状态 |
 |------|------|
-| 椎名林檎 - 17.mp3 | 10.4MB |
-| 周杰伦 - 龙卷风.mp3 | 9.6MB |
-| 周杰伦 - 给我一首歌的时间.mp3 | 9.7MB |
-| 周杰伦 - 爱在西元前.mp3 | 8.9MB |
-| 周杰伦 - 反方向的钟.mp3 | 9.8MB |
-| 周杰伦 - 你听得到.mp3 | 8.8MB |
-| Terror Squad - Take Me Home.mp3 | 8.1MB |
-| Ray Saetta - Somehow.mp3 | 7.0MB |
-| MC Sniper - 夜间飞行.flac | 25.5MB |
-| Kid Cudi - Maui Wowie.mp3 | 5.5MB |
+| L2 短期记忆 (行为事件 + 摘要) | ✅ |
+| L3 用户偏好 (偏好衰减 + 强化 + 蒸馏) | ✅ |
+| L4 长期历史 (播放记录持久化) | ✅ |
 
----
+### 粒子引擎 (frontend)
 
-## 三、当前开发阶段总结
+| 系统 | 状态 |
+|------|------|
+| 列弹簧 + 绕流 + 轨迹 | ✅ |
+| 核心动画 (呼吸环 + 拖拽回弹) | ✅ |
+| 三层光爆仪式 | ✅ |
+| 子弹时间 (双击) | ✅ |
+| 搜索布朗球 (长按) | ✅ |
+| 旋转音量 (内核环带) | ✅ |
+| 音频-粒子同步 (三频段) | ✅ |
+| E/W/D 颜色映射 + 形状切换 | ✅ |
+| 空闲时间梯度 (5 级衰减) | ✅ |
+| 凸透镜折射 | ✅ |
+| Matrix Code Rain 三层视差 | ✅ |
+| 星云捕获 → 歌单生成 | ✅ |
 
-按照 `malio-particle-body.md` 中定义的 **10 阶段计划**：
+### 交互
 
-| 阶段 | 内容 | 状态 |
+| 手势 | 状态 |
+|------|------|
+| 右滑切歌 | ✅ |
+| 双击内核 → 子弹时间 | ✅ |
+| 长按内核 → 搜索 | ✅ |
+| 内核拖拽释放 → 推荐 (反向具身化) | ✅ |
+| Ctrl+K 搜索 / H 隐藏 / / 聊天 | ✅ |
+
+### 联邦与规则
+
+| 功能 | 状态 |
+|------|------|
+| DSL 规则引擎 (particle-rules.js) | ✅ |
+| Agent 生成 JSON 规则 | ✅ |
+| 元规则管理 (归档/合并/冲突降级) | ✅ |
+| OODA 闭环 (前端规则反馈 → LLM) | ✅ |
+| 联邦规则交换 (export/import) | ✅ |
+
+### 集成
+
+| 服务 | 状态 |
+|------|------|
+| Kimi API (LLM) | ✅ |
+| 网易云音乐 (搜索/播放/导入) | ✅ |
+| Spotify (搜索/推荐) | ✅ |
+| ElevenLabs (TTS) | ✅ |
+| 天气场景感知 | ✅ |
+| 设备控制 | ✅ |
+
+### 测试
+
+| 类别 | 数量 | 通过 |
 |------|------|------|
-| 1 | engine.js — 列雨 + 绕流 + 轨迹 | **已完成** |
-| 2 | core.js — 屏幕中心空闲点 | 规划中 |
-| 3 | gestures.js — 右滑切歌 | 规划中 |
-| 4 | effects.js — 三重光爆仪式 | 规划中 |
-| 5 | 歌曲信息覆盖层 | 规划中 |
-| 6 | 滚轮音量控制 | 规划中 |
-| 7 | physics.js — 子弹时间 | 规划中 |
-| 8 | 长按搜索球 | 规划中 |
-| 9 | 核心状态机 (thinking/speaking/error) | 规划中 |
-| 10 | Atmosphere 自动推送 + 颜色渐变 | 规划中 |
-
-**当前进度**: 阶段 1 完成，准备进入阶段 2+3。
+| Smoke tests (httpx + ASGI) | 16 | 16 |
+| PersonaEngine 单元 | 8 | 8 |
+| VisualAgent 单元 | 6 | 6 |
+| LLMAutonomous 单元 | 6 | 6 |
+| Federation 集成 | 4 | 4 |
+| **总计** | **40** | **40** |
 
 ---
 
-## 四、三个 Spec 文档的关系
+## 四、已知限制
 
-```
-matrix-depth.md     → 粒子渲染层的空间深度（背景层 + 前景层 + 亮度 + 辉光）
-    ↓ 依赖
-malio-particle-body.md → 粒子作为 AI 身体的完整交互系统（手势 + 特效 + 信息编码）
-    ↓ 扩展
-core-expression.md  → 核心透镜的表情系统（呼吸环 + 拖拽 + 暂态环）
-```
+- WebSocket 未测（依赖浏览器环境）
+- 并发请求未测（单线程 ASGI transport）
+- 100+ 规则性能未知
+- 畸形输入恢复路径未覆盖
+- LLM 依赖导致部分测试偶发 flaky
+- `main.py` 1314 行，`app.js` 2031 行，单文件偏大
+- 文档更新滞后于代码迭代
 
-三个 spec 层层递进：先有深度系统，再有身体交互，最后是核心表情。
+---
+
+## 五、下一步建议
+
+| 优先级 | 事项 | 原因 |
+|--------|------|------|
+| 1 | 拆分 `main.py` 路由到独立模块 | 可维护性 |
+| 2 | `app.js` 模块化 (ES modules) | 可维护性 |
+| 3 | 补 WebSocket 集成测试 | 测试覆盖完整性 |
+| 4 | 并发测试 | 生产就绪 |

@@ -10,36 +10,45 @@ Malio 的回答：**内核是 agent 的身体，粒子流是它的环境，手�
 
 ---
 
-## 三层架构
+## 一、系统总览
 
 ```
-┌─────────────────────────────────────────────┐
-│  交互层 — 手势 + 粒子物理                    │
-│  ┌─────────┐ ┌──────────┐ ┌─────────────┐  │
-│  │ 手势识别 │ │ 粒子引擎  │ │ 内核渲染     │  │
-│  │ swipe    │ │ 800粒子  │ │ 光点/涡旋    │  │
-│  │ rotate   │ │ 100列阵  │ │ 折射/色散    │  │
-│  │ tap×2    │ │ 9大系统  │ │ 冲击波       │  │
-│  │ longpress│ │          │ │ 搜索球       │  │
-│  └─────────┘ └──────────┘ └─────────────┘  │
-├─────────────────────────────────────────────┤
-│  Agent 智能层 — 5 阶段流水线                 │
-│  Perception → Router → Reasoner → Tools → Feedback │
-├─────────────────────────────────────────────┤
-│  数据层 — 记忆 + 规则 + 偏好                 │
-│  ┌──────────┐ ┌──────────┐ ┌────────────┐  │
-│  │粒子记忆   │ │ DSL规则  │ │ 用户偏好    │  │
-│  │localStor │ │5条内置   │ │color-map   │  │
-│  │800条日志  │ │Agent生成 │ │persona提示  │  │
-│  └──────────┘ └──────────┘ └────────────┘  │
-└─────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│  交互层 — 手势 + 粒子物理 + 音频同步                    │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ │
+│  │ 手势识别  │ │ 粒子引擎  │ │ DSL 规则  │ │ 音频分析  │ │
+│  │ swipe     │ │ 800 粒子  │ │ 5 内置    │ │ 三频段    │ │
+│  │ tap×2     │ │ 9 大系统  │ │ Agent 生成│ │ 节拍检测  │ │
+│  │ longpress │ │ 星云捕获  │ │ OODA 闭环 │ │ 60fps 同步│ │
+│  │ drag rel  │ │ 凸透镜    │ │ 元规则    │ │           │ │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘ │
+├────────────────────────────────────────────────────────┤
+│  Agent 智能层 — 多组件协同                             │
+│  ┌─────────┐ ┌──────────┐ ┌────────────┐              │
+│  │Pipeline │ │MusicAgent│ │LLMAutonomous│              │
+│  │5-stage  │ │ReAct loop│ │proactive   │              │
+│  └─────────┘ └──────────┘ └────────────┘              │
+│  ┌─────────┐ ┌──────────┐ ┌────────────┐              │
+│  │ Persona │ │VisualAgent│ │ Federation │              │
+│  │Engine   │ │rule gov.  │ │ rule exch. │              │
+│  └─────────┘ └──────────┘ └────────────┘              │
+├────────────────────────────────────────────────────────┤
+│  数据层 — 记忆 + 规则 + 偏好                           │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐              │
+│  │ L2 短期   │ │ L3 偏好   │ │ L4 长期   │              │
+│  │ 行为事件  │ │ 用户画像  │ │ 播放历史  │              │
+│  └──────────┘ └──────────┘ └──────────┘              │
+├────────────────────────────────────────────────────────┤
+│  集成层                                                │
+│  Kimi(k2.5) · Spotify · NetEase · ElevenLabs · 天气   │
+└────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 一、交互层 — 粒子物理引擎
+## 二、交互层 — 粒子物理引擎
 
-### 粒子系统参数
+### 2.1 粒子系统参数
 
 | 参数 | 值 |
 |------|-----|
@@ -50,7 +59,7 @@ Malio 的回答：**内核是 agent 的身体，粒子流是它的环境，手�
 | REPEL_PADDING | 40px |
 | FPS 熔断 | <30fps 关闭绕流/偏转/搜索物理，保留拖尾+lerp |
 
-### 9 大物理系统
+### 2.2 9 大物理系统
 
 | # | 系统 | 描述 |
 |---|------|------|
@@ -64,36 +73,74 @@ Malio 的回答：**内核是 agent 的身体，粒子流是它的环境，手�
 | 8 | 搜索布朗球 | 150px 吸力 → 球壳约束 → 布朗运动 → 坍缩爆发 → 恢复力 |
 | 9 | 凸透镜折射 | 子弹时间内折射率场 n(r)=1+0.5×(1-r/R)，向心弯曲+RGB 三通道色散 |
 
-### 字符集
+### 2.3 附加系统
 
-日文片假名 + 平假名 + 日汉字 + 中文常用 + 希腊字母 + 俄语字母 + 英文数字
+| 系统 | 描述 |
+|------|------|
+| 星云捕获 (Nebula) | 长按拖拽收集粒子 → 释放生成歌单 |
+| Matrix Code Rain | 三层视差深度、垂直亮度渐变、核心辉光 |
+| 音频-粒子同步 | bass(0-340Hz)→速度+拖尾, mid(340-1400Hz)→饱和度, treble(1400-4100Hz)→振幅微抖 |
+| 自适应节拍检测 | bass 超过历史均值×1.5 触发 beat 脉冲 |
+| E/W/D 形状映射 | energy/warmth/density → swirl/pulse_ring/star/drop/bloom/hexagon/circle/diamond |
 
-### 全手势交互
+### 2.4 全手势交互
 
 | 手势 | 触发条件 | 功能 | 粒子反馈 |
 |------|---------|------|---------|
 | 右划卡片 | 30px 横向 | 切歌 | deflection → 光爆 → 新歌 |
-| Ctrl+H | — | 隐藏播放器 | 卡片+内核消失 |
 | 双击内核 | 350ms 内两次 tap | 子弹时间 | 时间梯度 + 拖拽 + 折射 |
 | 内核+旋转 | 400ms 无移动 | 音量旋钮 | 切向力跟随手指 |
 | 长按内核 | 600ms 无移动 | 搜索 | 布朗球 + 坍缩爆发 |
+| 内核拖拽释放 | drag → release | 氛围推荐 | 释放到 warm/cool/energy/calm 区域 |
+| Ctrl+H | — | 隐藏播放器 | 卡片+内核消失 |
+| / | — | 聚焦聊天框 | — |
+
+### 2.5 空闲时间梯度
+
+| 等级 | 时间 | 行为 |
+|------|------|------|
+| 0 | 0-3min | 正常活跃 |
+| 1 | 3-10min | 轻微衰减 |
+| 2 | 10-20min | 明显减速 |
+| 3 | 20-40min | 深度休眠 |
+| 4 | 40min+ | 极静模式 |
+
+夜间 (23-5h)：起点 level 2，10min 后进入 level 3+。
 
 ---
 
-## 二、Agent 智能层 — 5 阶段流水线
+## 三、Agent 智能层
+
+### 3.1 Agent 模块总览 (10 个模块)
+
+| 模块 | 文件 | 职责 |
+|------|------|------|
+| Pipeline | `agent/pipeline.py` | 5 阶段流水线编排 |
+| Perception | `agent/perception.py` | 环境感知（时间、天气、上下文） |
+| Router | `agent/router.py` | 路由分发（direct / reasoning / plan） |
+| Reasoner | `agent/reasoner.py` | Plan-and-Solve 推理 + atmosphere JSON |
+| Providers | `agent/providers.py` | LLM 提供商注册与切换 |
+| Tools | `agent/tools.py` | 工具注册与执行 |
+| Feedback | `agent/feedback.py` | WebSocket 推送 + 快照构建 |
+| MusicAgent | `agent/music_agent.py` | 单职责音乐推荐工作者 (ReAct loop) |
+| VisualAgent | `agent/visual_agent.py` | 粒子规则治理（评分/归档/合并/冲突） |
+| LLMAutonomous | `agent/llm_autonomous.py` | 自主行为（主动发言/FOIA/禁言） |
+| PersonaEngine | `agent/persona.py` | 人格引擎（漂移/否决/Phillips Curve） |
+
+### 3.2 5 阶段 Pipeline
 
 ```
 User Input → Perception → Router → Reasoner → Tools → Feedback
 ```
 
-### Perception
-接收用户消息、获取环境上下文（时间、天气）、加载用户偏好
+**Perception** — 接收用户消息、获取环境上下文（时间、天气、空闲状态）
 
-### Router
-显式命令直接执行（play/pause/stop/next/prev/volume），自然语言转入 Reasoner
+**Router** — 三种路由模式：
+- `direct` — 显式命令（play/pause/stop/next/prev/volume）
+- `plan` — 简单查询（天气之类），不经过 LLM
+- `reasoning` — 自然语言，进入 Reasoner
 
-### Reasoner
-Plan-and-Solve 三段式 + atmosphere 输出。加载 `prompts/dj-persona.md` 和 `user/color-map.json`，要求 LLM 返回 JSON：
+**Reasoner** — Plan-and-Solve 三段式推理。加载 `prompts/dj-persona.md` 和 `user/color-map.json`。LLM 返回 JSON：
 
 ```json
 {
@@ -111,29 +158,69 @@ Plan-and-Solve 三段式 + atmosphere 输出。加载 `prompts/dj-persona.md` �
 }
 ```
 
-### Tools
-Tool Registry 注册制：`search_music` / `get_weather` / `check_history`
+**Tools** — 11 个注册工具：`get_local_songs`, `search_music`, `get_weather`, `check_history`, `get_lyrics`, `get_current_song`, `get_playlist`, `get_recommendations`, `get_l2_summary`, `get_l3_profile`
 
-### Feedback
-- 构建 state_snapshot（song + playlist + is_playing + agent_log + atmosphere + tool_error）
-- WebSocket `/stream` 推送
-- `push_atmosphere_by_rules()` — 无 LLM 规则引擎，查 `color-map.json` 时段映射，每 30s 循环
+**Feedback** — WebSocket `/stream` 推送 `state_snapshot`（song + playlist + is_playing + agent_log + atmosphere + core_action）
 
-### 后端协程
+### 3.3 PersonaEngine
 
-`@app.on_event("startup")` 启动 `asyncio.create_task(_atmosphere_loop())`，每 30s 根据时间自动推送 atmosphere
+人格三位一体参数：`energy`, `warmth`, `playfulness`。随时间自然漂移，用户交互修正。
+
+**否决机制** — 低 energy 时阻止高能动作：
+- energy < 0.25 时 `light_burst` 被否决 → 替代为 `breath`
+- energy < 0.15 时 `set_shape` 被否决
+- `set_color` 豁免（低能仍需色彩）
+
+**Phillips Curve Trade-off** — 任一维度超过 0.8 时，自动衰减其他维度：
+- energy > 0.8 → warmth -0.003
+- warmth > 0.8 → playfulness -0.002
+- playfulness > 0.8 → energy -0.002
+
+### 3.4 VisualAgent — 规则治理
+
+负责管理粒子 DSL 规则的生命周期：
+
+| 元规则 | 场景 | 行为 |
+|--------|------|------|
+| 死规则归档 | hits=0 + inactive + 27h+ | 标记 `_archived: true` |
+| 合并候选 | 多条规则 target 相同 | 标记 `_merge_candidate` |
+| 冲突降级 | 同一 target 矛盾操作 | 低 priority 停用 + `_conflict_with` |
+| 评分计算 | 每条规则 | hits × freshness × active |
+| 天气联动 | rain → 降 speed | 自动调整 |
+
+### 3.5 LLMAutonomous — 自主行为
+
+- **主动发言** — LLM 决定是否在无提示时说话
+- **FOIA 审计** — 每条发言记录 type/reason/message
+- **节流** — 30min 内最多说 1 次
+- **禁言机制** — 发言后 120s 无交互 → dismissed+1：
+  - dismissed=2 → 禁言 2h
+  - dismissed=3 → 禁言 6h
+- **用户交互后** — dismissed 重置为 0
+
+### 3.6 Reverse Embodiment (反向具身化)
+
+用户拖拽内核释放 → 释放位置决定 zone (warm/cool/energy/calm) → 映射为音乐推荐 prompt → 推送 `/api/chat` → 切歌 + 换氛围
 
 ---
 
-## 三、数据层 — 记忆与规则
+## 四、数据层 — 记忆与规则
 
-### 粒子记忆系统
+### 4.1 三层记忆系统
 
-每个粒子携带 `{mem, memType}` 字段，记录被拖拽/光爆炸/内核穿越的次数。老兵粒子自动增亮（`+mem×0.05`）放大（`+mem×0.01`）。`localStorage` 持久化总交互计数。
+| 层级 | 模块 | 存储 | 内容 |
+|------|------|------|------|
+| L2 短期 | `memory/short_term.py` | 内存 + state_store | 最近 30 天行为事件、每日摘要 |
+| L3 用户偏好 | `memory/user_profile.py` | JSON 持久化 | 艺术家/流派偏好强度、行为模式 |
+| L4 长期 | `memory/history.py` | JSONL 文件 | 完整播放/交互历史 |
 
-### DSL 规则引擎（particle-rules.js）
+**L2→L3 蒸馏** — 每 24h 自动运行，从 L2 摘要提取长期偏好模式
 
-Agent 可以输出 JSON 规则编程粒子行为：
+**偏好衰减** — 切歌 → L3 偏好 weaken（正常切歌 -0.03，URL 失效 -0.05）
+
+### 4.2 DSL 规则引擎 (particle-rules.js)
+
+Agent 输出 JSON 规则编程粒子行为：
 
 ```json
 {
@@ -147,11 +234,9 @@ Agent 可以输出 JSON 规则编程粒子行为：
 
 5 条系统预置规则：夜间降速、空闲减速、切歌余震、密度熔断、日光渐变。
 
-规则每帧评估，支持：`time_gt/lt`、`idle_gt/lt`、`event`、`count_gt/lt`、`bass_gt/lt`、`day_in`。
-动作支持：`set`、`mult`、`add`、`lerp_to`、`clamp`。
-支持 `rampDown` 定时回退和 `endWhen` 终止条件。
+**OODA 闭环** — 前端 `engine.onRuleFeedback` → WebSocket `core_event` → 后端 _rule_feedback_cache → LLM 评估规则健康
 
-### 情绪-颜色映射 (color-map.json)
+### 4.3 情绪-颜色映射 (color-map.json)
 
 | 标签 | 颜色 | 速度 | 密度 | 振幅 | 用途 |
 |------|------|------|------|------|------|
@@ -162,53 +247,97 @@ Agent 可以输出 JSON 规则编程粒子行为：
 | night_calm | #1A5B3A | 0.5 | 0.2 | 0.03 | 深夜安静 |
 | rainy_introspect | #5B7FA5 | 0.9 | 0.6 | 0.08 | 雨天内省 |
 
-`_rules.time_of_day`：morning→joyful, afternoon→calm_focus, evening→joyful, 23-5h→night_calm
+---
+
+## 五、联邦规则交换
+
+- `GET /api/rules/export` — 导出全部规则（匿名化）
+- `POST /api/rules/import` — 导入外部规则：
+  - 去重（按 when 条件）
+  - 外来规则 score × 0.7（观察期）
+  - 保留 `_source: "federated"` 标签
 
 ---
 
-## 四、音频-粒子实时同步
+## 六、后台协程
 
-`AudioAnalyzer` 封装 Web Audio API，提取三频段能量：
-- bass (0-340Hz) → 粒子速度 + 拖尾拉长
-- mid (340-1400Hz) → 颜色饱和度
-- treble (1400-4100Hz) → 振幅微抖
-- 自适应节拍检测（bass 超过历史均值×1.5 触发 beat）
+FastAPI `startup` 事件启动 3 个后台循环：
+
+| 协程 | 周期 | 职责 |
+|------|------|------|
+| `_atmosphere_loop` | 10s | 时间/天气感知 → 人格漂移 → VisualAgent 规则管理 → LLM 主动发言 |
+| `_distill_loop` | 1h | L2→L3 蒸馏（需 ≥5 条当日事件） |
+| `_persist_loop` | 5min | 会话状态持久化 |
 
 ---
 
-## 五、数据流
+## 七、数据流
 
 ```
-用户输入 → Reasoner(LLM) → atmosphere JSON + rules JSON
+用户输入 → Perception(Router) → Reasoner(LLM) → atmosphere JSON + rules JSON
               ↓
-        feedback.push_snapshot(atmosphere={...})
+        Pipeline.run() → 整合
               ↓
-        WebSocket → ws-client.js
+        feedback.push_snapshot(atmosphere={...}, core_action={...})
               ↓
-        判断 tag 变/不变 → 选 lerp 速度
+        WebSocket → ws-client.js → wsClient.onSnapshot
               ↓
         engine.updateParams → 粒子颜色/速度/密度 lerp 过渡
-
-后台协程 → push_atmosphere_by_rules() → 查 color-map.json
               ↓
-        同样推 atmosphere（低优先级，用户输入覆盖）
+        particleRules.evaluate() → 持续影响粒子行为
 
-Agent 规则 → WebSocket → wsClient.onRule → particleRules.addRule()
+反向路径 (OODA):
+  前端 rule_feedback → WebSocket → _rule_feedback_cache
               ↓
-        每帧 evaluate() → engine.params 实时修改
+  VisualAgent._manage_rules → 归档/合并/冲突降级
 
-音频 → AudioAnalyzer.analyze() → engine.setAudioData({bass,mid,treble,beat})
+交互路径:
+  手势 → 前端粒子响应 + sendCoreEvent
               ↓
-        粒子速度/拖尾/密度 60fps 同步音乐
+  WebSocket → 后端状态变更 → L2 记录 → L4 记录 → snapshot 回推
+
+反向具身化:
+  内核拖拽释放 → zone 判定 → /api/chat → 推荐 → 切歌 + 氛围切换
 ```
 
 ---
 
-## 六、创新点
+## 八、集成层
 
-1. **Agent 具身化**：AI 不以对话框形态存在，而以粒子流生命体形态存在于屏幕中央
-2. **手势 → 物理 → Agent 闭环**：用户操作的不是 UI 按钮，而是和 Agent 的身体进行物理互动
-3. **情绪可视化**：LLM 输出的 atmosphere JSON 直接驱动 800 个粒子的速度/颜色/密度变化
-4. **粒子记忆指纹**：每个粒子的交互历史编码了用户的行为模式，形成唯一视觉指纹
-5. **DSL 规则引擎**：Agent 通过自然语言接收需求，输出 JSON 规则持续编程粒子行为，规则有生命周期自进化
-6. **音频-粒子闭环**：Agent 选的歌反过来控制粒子的物理行为
+| 服务 | 模块 | 功能 |
+|------|------|------|
+| Kimi API | `integrations/kimi_integration.py` | LLM 对话 + 推荐 + 歌单命名 |
+| Spotify | `integrations/spotify_integration.py` | 搜索/推荐/曲库管理 |
+| 网易云音乐 | `integrations/netease_integration.py` | 搜索/播放URL获取/导入 |
+| ElevenLabs | `integrations/elevenlabs_integration.py` | TTS 语音合成 |
+| 天气 API | `core/scene_aware_engine.py` | 实时天气 → 氛围调整 |
+
+---
+
+## 九、测试架构
+
+40 个测试，全部通过。
+
+| 类别 | 数量 | 框架 |
+|------|------|------|
+| Smoke (端到端) | 16 | httpx + ASGI transport |
+| PersonaEngine | 8 | 单元测试 |
+| VisualAgent | 6 | 单元测试 |
+| LLMAutonomous | 6 | 单元测试 |
+| Federation | 4 | 集成测试 |
+
+覆盖：pipeline 全路径、Router 三模式、MusicAgent ReAct loop、DSL 规则生成、偏好衰减、OOB 边界、空歌单、事件完整性。
+
+---
+
+## 十、创新点
+
+1. **Agent 具身化** — AI 不以对话框形态存在，而以粒子流生命体存在于屏幕中央
+2. **手势 → 物理 → Agent 闭环** — 用户操作的不是 UI 按钮，而是 Agent 的身体物理互动
+3. **情绪可视化** — LLM atmosphere JSON 直接驱动 800 个粒子的速度/颜色/密度
+4. **粒子记忆指纹** — 每个粒子的交互历史编码用户行为模式
+5. **DSL 规则 + OODA** — Agent 用 JSON 规则持续编程粒子行为，前端回传规则健康数据
+6. **音频-粒子闭环** — Agent 选的歌反过来控制粒子的物理行为
+7. **三层记忆 + 蒸馏** — 短期行为自动沉淀为长期偏好
+8. **反向具身化** — 用户对 Agent 身体的物理操作被翻译为音乐请求
+9. **联邦规则交换** — 多实例之间匿名共享规则，互相学习

@@ -49,7 +49,7 @@ for fname in sorted(os.listdir(MUSIC_DIR)):
     song = Song(
         id=song_id, title=title, artist=artist,
         album="Local Import", duration=180,
-        audio_path=safe_name,
+        audio_path="songs/" + safe_name,
     )
     session.add(song)
     db_titles.add(title)

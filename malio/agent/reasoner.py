@@ -148,6 +148,26 @@ class Reasoner:
             lines.append("")
             lines.append(l3_profile)
 
+        # Cross-turn entity bridge: song discussed in previous turn
+        discussed = context.get("recently_discussed")
+        if discussed and isinstance(discussed, dict) and discussed.get("title"):
+            lines.extend([
+                "",
+                f"【上下文衔接】上一轮聊天中讨论了歌曲「{discussed.get('title','')}」",
+                f"曲库ID: {discussed.get('song_id','')}  艺人: {', '.join(discussed.get('artist',[]))}",
+                "如果用户说「放吧/来一首/就这首」等指向性短语，默认播放这首歌。",
+            ])
+
+        # Wild Card: sanctioned creative risk
+        if context.get("wild_card"):
+            lines.extend([
+                "",
+                "🎲【Wild Card】你被授予一次创意冒险权。",
+                "推一首你直觉上觉得对、但不在安全置信区间的歌。",
+                "在 response 里标注 [Wild Card] 让用户知道这是你的冒险选择。",
+                "如果用户喜欢，playfulness 会上涨；如果跳过，也不会惩罚你——这是架构批准的犯错通道。",
+            ])
+
         lines.extend([
             "",
             f"User input: {user_input}",
@@ -166,12 +186,9 @@ class Reasoner:
             "core_actions": [],
             "atmosphere": None,
             "rules": [{
-                "#IMPORTANT": "当用户要求持久变化（如'以后晚上暗一点'），必须在此字段生成规则。不是口头答应——要输出JSON规则。最多3条，系统预设规则优先。",
-                "id": "agent_<timestamp>",
-                "when": {"type": "time_gt | time_lt | idle_gt | event", "val": "23:00 or 300 or song_change"},
-                "then": [{"target": "speed | brightness | amplitude | density | color", "op": "set | mult | add | lerp_to", "val": 0.7}],
-                "endWhen": {"type": "time_gt | time_lt", "val": "05:00"},
-                "note": "简短说明为什么创建这条规则"
+                "#IMPORTANT": "当用户要求持久变化，必须在此生成规则。视觉规则(修改粒子外观)用speed/brightness/amplitude/density/color targets。推荐策略规则(修改音乐推荐行为)用genre_boost/genre_suppress/energy_bias/novelty_bias/language_bias targets。策略规则不需要'when'条件——始终生效，用endWhen设过期。",
+                "#visual_example": {"id":"agent_<ts>","when":{"type":"time_gt","val":"23:00"},"then":[{"target":"brightness","op":"mult","val":0.5}],"endWhen":{"type":"time_lt","val":"06:00"},"note":"晚上变暗"},
+                "#strategy_example": {"id":"agent_<ts>","then":[{"target":"energy_bias","op":"set","val":">0.7"}],"endWhen":{"type":"time_gt","val":"3d"},"note":"最近多推高能量歌"}
             }]
         }
         lines.append(json.dumps(format_obj, ensure_ascii=False))
@@ -185,10 +202,20 @@ class Reasoner:
 
         lines.append("")
         lines.append("## DSL Rule reference (for the optional 'rules' field)")
+        lines.append("")
+        lines.append("### Visual rules (affect particle appearance)")
         lines.append("- Conditions: time_gt(HH:MM), time_lt(HH:MM), idle_gt(seconds), event(song_change|beat)")
         lines.append("- Actions: set, mult, add, lerp_to")
         lines.append("- Targets: speed, brightness, amplitude, density, color")
-        lines.append("- System rules (higher priority) always override agent rules.")
+        lines.append("")
+        lines.append("### Strategy rules (affect music recommendation — backend only, no visual effect)")
+        lines.append("- genre_boost: boost specific genre. val='electronic'")
+        lines.append("- genre_suppress: suppress genre. val='ballad'")
+        lines.append("- energy_bias: favor energy range. val='>0.7' or '<0.3'")
+        lines.append("- novelty_bias: favor unplayed songs. val=0.5 (0.5=50% boost)")
+        lines.append("- language_bias: favor language. val='cn' or 'en' or 'jp' or 'kr'")
+        lines.append("- Strategy rules do NOT use 'when' conditions — they are always active and should have endWhen for decay.")
+        lines.append("- Max 2 strategy rules at a time. System rules (higher priority) always override agent rules.")
         lines.append("")
         lines.append("Respond with ONLY the JSON object, no other text.")
 
