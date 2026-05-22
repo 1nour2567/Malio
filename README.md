@@ -8,6 +8,7 @@
 
 <h1 align="center">🎵 Malio</h1>
 <h3 align="center">具身化 AI 音乐 Agent — Constraint Architecture 交互方向参考实现</h3>
+<p align="center"><b>See also: <a href="https://github.com/1nour2567/kylin-agent">Kylin-Agent</a> (security reference implementation)</b></p>
 
 <p align="center">
   <b>800 particles · 9-shape morphable core · beat-synchronized pulse · water ripple physics</b>
