@@ -1,7 +1,9 @@
-"""LLM-driven autonomous behavior — context-aware core actions.
+"""LLM-driven autonomous behavior — event reactor + proactive heartbeat.
 
-Triggered after user interactions (chat, skip).  Debounced 5s.
-LLM sees event summary + persona state + time → outputs one core_action.
+_react():          event-triggered (chat, skip, drag). Debounced 5s.
+maybe_speak():     throttled proactive speech (30min, suppressed by dismissal).
+_proactive_loop(): persona-driven pulse — interval changes with energy/time.
+                   LLM sees context + thought chain → speak/act/rule/think/silent.
 """
 import json, re, asyncio, sys, random
 from collections import deque
@@ -9,21 +11,46 @@ from datetime import datetime
 
 
 class LLMAutonomous:
-    """Event-driven LLM reactor. Watches interaction events, triggers LLM."""
+    """Event-driven + clock-driven autonomous agent.
 
-    def __init__(self, provider_registry, feedback_mgr, persona_engine):
+    _react():          event-triggered (chat, skip, drag). Debounced 5s.
+    maybe_speak():     throttled proactive speech (30min, suppressed by dismissal).
+    _proactive_loop(): persona-driven pulse. LLM sees context + its own thought
+                       chain and decides: speak / act / rule / silent / think.
+    """
+
+    def __init__(self, provider_registry, feedback_mgr, persona_engine,
+                 l2_memory=None, scene_engine=None):
         self._provider = provider_registry
         self._feedback = feedback_mgr
         self._persona = persona_engine
+        self._l2 = l2_memory
+        self._scene = scene_engine
         self._queue = deque(maxlen=30)
         self._busy = False
         self._last_actions = deque(maxlen=5)
         self._call_count = 0
-        self._last_speak_ts = 0           # throttle proactive speech
-        self._speak_suppress_until = 0     # cooldown after dismissals
-        self._consecutive_dismissed = 0    # consecutive times user ignored speech
-        self._last_speak_time = 0          # when last proactive speech was sent
+        self._last_speak_ts = 0
+        self._speak_suppress_until = 0
+        self._consecutive_dismissed = 0
+        self._last_speak_time = 0
         self._speech_log = []              # FOIA audit trail
+        self._proactive_running = False
+        # Thought continuity across cycles
+        self._inner_thought = ""           # last cycle's lingering thought
+        self._thought_chain = deque(maxlen=48)  # 6h × 8min cycles, full arc
+        self._last_pulse_at = 0            # timestamp of last pulse
+
+    def start_proactive(self):
+        """Launch the 8-minute proactive loop. Idempotent."""
+        if self._proactive_running:
+            return
+        self._proactive_running = True
+        asyncio.create_task(self._proactive_loop())
+        sys.stderr.write("[proactive] loop started (persona-driven pulse)\n")
+
+    def stop_proactive(self):
+        self._proactive_running = False
 
     def push(self, label: str, detail: str = ""):
         """Record an interaction event. Also tracks user response to proactive speech."""
@@ -300,6 +327,248 @@ class LLMAutonomous:
             if self._queue:
                 sys.stderr.write(f"[llm-auto] respawning — {len(self._queue)} events waiting\n")
                 asyncio.create_task(self._react())
+
+    # ── Clock-driven proactive loop ───────────────────────────
+
+    def _pulse_interval(self) -> int:
+        """Persona-driven rhythm. Energy + time of day determine pulse rate.
+
+        Returns seconds until next pulse.
+        """
+        import time as _time
+        p = self._persona
+        hour = datetime.now().hour
+
+        if 23 <= hour or hour < 5:
+            base = 1200  # deep night: 20min
+        elif p.energy > 0.7:
+            base = 180   # high energy: 3min
+        elif p.energy > 0.3:
+            base = 480   # normal: 8min
+        else:
+            base = 1200  # low energy: 20min
+
+        # Jitter ±20% so pulses don't feel mechanical
+        jitter = int(base * 0.2 * (hash(str(_time.time())) % 100 - 50) / 100)
+        return max(60, base + jitter)
+
+    def _persona_style_hint(self) -> str:
+        """Persona → language style directive. Makes float values visible
+        through structural changes in LLM output style."""
+        p = self._persona
+        hints = []
+
+        if p.energy < 0.3:
+            hints.append("你很疲惫。说话简短，不超过 8 个字。偏好安静而不是行动。")
+        elif p.energy > 0.7:
+            hints.append("你充满能量。主动观察，敢于提议。语气活泼、有节奏感。")
+
+        if p.warmth < 0.3:
+            hints.append("你情绪偏冷。保持距离，不假装热情。用词简洁客观。")
+        elif p.warmth > 0.7:
+            hints.append("你是温暖的陪伴。可以表达关心，语气柔软、有温度。")
+
+        if p.playfulness < 0.3:
+            hints.append("你今天偏严肃。不开玩笑，直接但不生硬。")
+        elif p.playfulness > 0.7:
+            hints.append("你今天有玩心。可以小幽默一下，不端着。")
+
+        return "\n".join(hints) if hints else "你状态平衡。自然对话即可。"
+
+    async def _proactive_loop(self):
+        """Persona-driven heartbeat — not a fixed clock but a living rhythm.
+
+        Four improvements over a dumb timer:
+        1. Pulse interval changes with energy and time of day
+        2. inner_thought — one string surviving across cycles
+        3. Persona → language style — floats drive LLM output tone
+        4. Thought chain — 48-slot deque forms a narrative arc
+        """
+        import time as _time
+
+        while self._proactive_running:
+            interval = self._pulse_interval()
+            await asyncio.sleep(interval)
+
+            provider = self._provider.get_active()
+            if not provider:
+                continue
+
+            now = datetime.now()
+            now_ts = _time.time()
+            tod = ("morning" if 5 <= now.hour < 12 else
+                   "afternoon" if 12 <= now.hour < 18 else
+                   "evening" if 18 <= now.hour < 22 else "night")
+            p = self._persona
+            self._last_pulse_at = now_ts
+
+            # ── Build context ──
+            context_parts = [f"时间: {now.strftime('%H:%M')} {tod}"]
+
+            if self._scene:
+                try:
+                    wx = self._scene.get_weather_context(24.9175, 118.6465) or {}
+                    if wx:
+                        context_parts.append(
+                            f"天气: {wx.get('condition','?')} "
+                            f"{wx.get('temperature','?')}°C"
+                        )
+                except Exception:
+                    pass
+
+            if self._l2:
+                try:
+                    summary = self._l2.summarize()
+                    if summary:
+                        context_parts.append(f"近期行为: {summary}")
+                except Exception:
+                    pass
+
+            context_parts.append(
+                f"persona: energy={p.energy:.2f} warmth={p.warmth:.2f} "
+                f"playfulness={p.playfulness:.2f}"
+            )
+
+            try:
+                from core.state_manager import get_chat_history
+                chat = list(get_chat_history())
+                if chat:
+                    last = chat[-1]
+                    role = "用户" if last.get("role") == "user" else "Malio"
+                    context_parts.append(
+                        f"最近对话: {role}: {str(last.get('content',''))[:60]}"
+                    )
+            except Exception:
+                pass
+
+            context = "\n".join(context_parts)
+
+            # ── Thought thread ──
+            thread_block = ""
+            if self._inner_thought:
+                thread_block += (
+                    f"你上次在想: {self._inner_thought}\n"
+                    f"可以延续这个想法，也可以开始新的。\n"
+                )
+
+            # Last 5 thoughts as narrative arc
+            recent_thoughts = [
+                t for t in self._thought_chain
+                if t.get("thought")
+            ][-5:]
+            if recent_thoughts:
+                thread_block += "近期思维弧线:\n"
+                for t in recent_thoughts:
+                    thread_block += (
+                        f"  {t.get('ts','')} → {t.get('thought','')[:60]}\n"
+                    )
+                thread_block += (
+                    "如果这些 thoughts 显示出一种趋势或模式，你可以自然地延续它。\n"
+                )
+
+            # ── Persona style ──
+            style = self._persona_style_hint()
+
+            # ── Build prompt ──
+            prompt = (
+                f"你是 Malio，一个有身体（粒子引擎）的 AI 音乐代理。\n"
+                f"{style}\n\n"
+                f"你现在正在自主审视当前状态——没有人@你，你自己决定要不要做点什么。\n\n"
+                f"{context}\n\n"
+                + (f"{thread_block}\n\n" if thread_block else "") +
+                f"你有五个选项：\n"
+                f"1. 主动说话 — {{\"say\": true, \"message\": \"...≤25字中文\"}}\n"
+                f"   时机: 切换时段、天气变化、注意到用户行为模式时。\n"
+                f"2. 做动作 — {{\"action\": \"breath|move_core|light_burst\", \"params\": {{...}}}}\n"
+                f"   保持微妙——这是呼吸，不是骚扰。\n"
+                f"3. 写规则 — {{\"rule\": {{...}}}}\n"
+                f"   当且仅当你明确识别出一个持久行为模式。\n"
+                f"4. 思考 — {{\"say\": false, \"thought\": \"你在想的事情，≤40字中文\"}}\n"
+                f"   还没到说话的时候，但有一个内在想法在酝酿。\n"
+                f"5. 完全静默 — {{\"say\": false}}\n"
+                f"   如果没什么值得说或想的，静默是正确的。\n\n"
+                f"只输出JSON。"
+            )
+
+            try:
+                raw = await asyncio.to_thread(provider.generate, prompt)
+                sys.stderr.write(
+                    f"[proactive] {now.strftime('%H:%M')} "
+                    f"(e={p.energy:.2f} {interval}s) "
+                    f"LLM: {raw[:100].replace(chr(10),' ')}\n"
+                )
+
+                # ── Extract thought (may coexist with any action) ──
+                extracted = LLMAutonomous._extract_json(raw, "say")
+                thought_text = ""
+                if extracted:
+                    thought_text = (extracted.get("thought") or "").strip()[:40]
+
+                # ── Say ──
+                if extracted and extracted.get("say") and extracted.get("message"):
+                    msg = str(extracted["message"])[:25]
+                    if p.warmth < 0.3:
+                        msg = msg[:12]
+                    await self._feedback.push_snapshot(agent_log=msg)
+                    entry = {
+                        "ts": now.isoformat(), "type": "proactive_loop",
+                        "decided_by": "LLM", "message": msg,
+                        "thought": thought_text or "",
+                    }
+                    self._speech_log.append(entry)
+                    if len(self._speech_log) > 50:
+                        self._speech_log = self._speech_log[-25:]
+                    # Persist thought for next cycle
+                    if thought_text:
+                        self._inner_thought = thought_text
+                        self._thought_chain.append({
+                            "ts": now.strftime('%H:%M'), "thought": thought_text,
+                        })
+                    continue
+
+                # ── Rule ──
+                rule = LLMAutonomous._extract_rule(raw)
+                if rule:
+                    rule["_created_by"] = "LLM"
+                    rule["_created_at"] = now.isoformat()
+                    rule["_created_reason"] = f"自主发现 {tod}"
+                    await self._feedback.push_rule(rule)
+                    if thought_text:
+                        self._inner_thought = thought_text
+                        self._thought_chain.append({
+                            "ts": now.strftime('%H:%M'), "thought": thought_text,
+                        })
+                    continue
+
+                # ── Action ──
+                action = LLMAutonomous._extract_action(raw)
+                if action:
+                    await self._feedback.push_snapshot(core_action=action)
+                    if thought_text:
+                        self._inner_thought = thought_text
+                        self._thought_chain.append({
+                            "ts": now.strftime('%H:%M'), "thought": thought_text,
+                        })
+                    continue
+
+                # ── Thought only (no action, no speech — just inner narrative) ──
+                if thought_text:
+                    self._inner_thought = thought_text
+                    self._thought_chain.append({
+                        "ts": now.strftime('%H:%M'), "thought": thought_text,
+                    })
+                    sys.stderr.write(
+                        f"[proactive] thought: {thought_text[:60]}\n"
+                    )
+                    continue
+
+                # ── Pure silence ──
+                self._inner_thought = ""  # deliberately clear
+
+            except Exception as e:
+                sys.stderr.write(f"[proactive] error: {e}\n")
+
+    # ── Proactive speech (legacy, throttled) ──────────────────
 
     async def maybe_speak(self):
         """Proactive speech: LLM decides if it should say something unprompted.

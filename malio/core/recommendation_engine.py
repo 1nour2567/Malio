@@ -6,6 +6,73 @@ from core.scene_aware_engine import SceneAwareEngine
 from config.config import settings
 
 
+# ── Recommendation strategy rules ──────────────────────────────
+# Active agent rules with recommendation targets are checked at
+# scoring time. These targets extend the DSL beyond particle params.
+
+STRATEGY_TARGETS = {
+    "genre_boost", "genre_suppress", "energy_bias",
+    "novelty_bias", "language_bias",
+}
+
+def _get_active_strategy_rules() -> list[dict]:
+    """Fetch active agent rules that target recommendation strategy."""
+    try:
+        from core.state_manager import get_agent_rules
+        rules = get_agent_rules()
+        active = []
+        for r in rules:
+            if not r.get("_active", True):
+                continue
+            for a in (r.get("then") if isinstance(r.get("then"), list) else []):
+                if a.get("target") in STRATEGY_TARGETS:
+                    active.append(r)
+                    break
+        return active
+    except Exception:
+        return []
+
+
+def _apply_strategy_modifier(song, base_score: float) -> float:
+    """Apply active strategy rules as bonus/malus to song score."""
+    rules = _get_active_strategy_rules()
+    if not rules:
+        return base_score
+
+    modifier = 0.0
+    genre_list = [g.lower() for g in (song.genre or [])]
+    energy_val = (song.energy or 0.5)
+    title = (song.title or "").lower()
+    artist_list = [a.lower() for a in (song.artist or [])]
+
+    for rule in rules:
+        for action in (rule.get("then") if isinstance(rule.get("then"), list) else []):
+            target = action.get("target", "")
+            op = action.get("op", "set")
+            val = action.get("val", 0)
+
+            if target == "genre_boost":
+                if isinstance(val, str) and val.lower() in genre_list:
+                    modifier += 0.15
+            elif target == "genre_suppress":
+                if isinstance(val, str) and val.lower() in genre_list:
+                    modifier -= 0.15
+            elif target == "energy_bias":
+                if isinstance(val, str):
+                    threshold = float(val.replace(">", "").replace("<", "").strip())
+                    if ">" in val and energy_val > threshold:
+                        modifier += 0.10
+                    elif "<" in val and energy_val < threshold:
+                        modifier += 0.10
+            elif target == "novelty_bias":
+                modifier += float(val) * 0.10
+            elif target == "language_bias":
+                if isinstance(val, str) and val in title:
+                    modifier += 0.10
+
+    return base_score + modifier
+
+
 class RecommendationEngine:
     """Music recommendation engine"""
 
@@ -106,7 +173,12 @@ class RecommendationEngine:
                 mood_score = preferences["mood_preferences"].get(user_mood, {}).get(song_id, 0) * 0.15
                 score += mood_score
 
-            # 5. Weather context score (10%)
+            # 5. Strategy rule modifier (—∞ to +∞, capped at ±0.3)
+            strategy_mod = _apply_strategy_modifier(song, 0.0)
+            strategy_mod = max(-0.3, min(0.3, strategy_mod))
+            score += strategy_mod
+
+            # 6. Weather context score (10%)
             weather = context.get("weather", {})
             if weather:
                 weather_condition = weather.get("condition")

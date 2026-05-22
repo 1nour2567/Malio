@@ -48,6 +48,10 @@ class Pipeline:
             perception_ctx = self.perception.build(request.input, request.user_id)
             if request.context:
                 perception_ctx["context"] = request.context
+            # Inject cross-turn entity bridge: song discussed last turn
+            if getattr(self, '_last_discussed', None):
+                perception_ctx["recently_discussed"] = self._last_discussed
+                self._last_discussed = None  # one-shot, don't carry over twice
 
             from core.state_manager import get_core_events, get_chat_history, get_agent_rules
             from memory.short_term import l2_memory
@@ -63,6 +67,10 @@ class Pipeline:
             perception_ctx["persona_style"] = self.persona_engine.style_for_prompt()
             perception_ctx["persona_drift_log"] = self.persona_engine.drift_log_for_prompt()
             perception_ctx["agent_active_rules"] = list(get_agent_rules(uid))
+            # Creative risk: sanctioned "mistake" channel
+            import random as _random
+            if self.persona_engine.playfulness > 0.6 and _random.random() < self.persona_engine.creative_risk:
+                perception_ctx["wild_card"] = True
 
             # Stage 2: Router
             print("[chat] Stage 2: Router...")
@@ -273,6 +281,25 @@ class Pipeline:
             reasoner_result["intent"] = "general_chat"
         if not recommendations and reasoner_result.get("intent") in MUSIC_INTENTS:
             recommendations = self.recommendation_engine.get_contextual_recommendations(request.user_id, 5) or []
+
+        # ── Cross-turn entity bridge: extract song titles from general_chat ──
+        if reasoner_result.get("intent") == "general_chat":
+            try:
+                from core.state_manager import query_local_songs
+                import re as _re
+                candidates = _re.findall(r'[《「]([^》」]+)[》」]', response_text)
+                if candidates:
+                    all_songs = query_local_songs(200, self.recommendation_engine)
+                    for title in candidates:
+                        for s in all_songs:
+                            if title.lower() in (s.get("title","") or "").lower():
+                                self._last_discussed = {
+                                    "title": s["title"], "song_id": s["id"],
+                                    "artist": s.get("artist", []),
+                                }
+                                break
+            except Exception:
+                pass  # best-effort
 
         # Stage 5: Feedback
         print("[chat] Stage 5: Feedback...")

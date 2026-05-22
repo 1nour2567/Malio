@@ -720,13 +720,20 @@ function nextSong (skipSource) {
   if (now - _lastSkipTime < 800) return;
   _lastSkipTime = now;
 
-  /* advance locally immediately, backend syncs asynchronously */
-  if (state.playlist.length > 0) {
-    state.playlistIndex = (state.playlistIndex + 1) % state.playlist.length;
-    setCurrentSong(state.playlist[state.playlistIndex]);
-    state.isPlaying = true;
-    if (dom.audioPlayer) dom.audioPlayer.play().catch(function () {});
+  /* Silence gap: 0.3-0.5s of breathing room between songs */
+  if (dom.audioPlayer) dom.audioPlayer.pause();
+  if (typeof engine !== 'undefined') {
+    engine.updateParams({ amplitude: 0.15 }, 0.1);  // particle fade-out
   }
+  var gapMs = 300 + Math.random() * 200;  // 300-500ms — not exact, breathing
+  setTimeout(function () {
+    if (state.playlist.length > 0) {
+      state.playlistIndex = (state.playlistIndex + 1) % state.playlist.length;
+      setCurrentSong(state.playlist[state.playlistIndex]);
+      state.isPlaying = true;
+      if (dom.audioPlayer) dom.audioPlayer.play().catch(function () {});
+    }
+  }, gapMs);
   if (wsClient) {
     var source = skipSource || 'user';
     if (window._songBroken) { source = 'broken'; window._songBroken = false; }

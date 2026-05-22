@@ -38,6 +38,9 @@ class PersonaEngine:
         self._skip_24h_count = 0    # cumulative skips in 24h for spiral detection
         self._skip_24h_reset = 0.0  # timestamp when 24h counter was last reset
 
+        # ── Creative risk: sanctioned "mistake" channel ──────
+        self.creative_risk = 0.05  # baseline 5%, LLM cannot directly set
+
         # ── Drift parameters ────────────────────────────────
         self._drift_rate = 0.008       # max drift per event
         self._natural_decay = 0.02     # per hour toward baseline (faster recovery)
@@ -432,6 +435,16 @@ class PersonaEngine:
             elif zone == "calm":
                 delta_e = -self._drift_rate * 0.3
             reason = f"内核释放选歌({zone})"
+        elif event_type == "wild_card":
+            accepted = (detail or {}).get("accepted", False)
+            if accepted:
+                delta_p = +self._drift_rate * 1.5  # user liked the risk → more playful
+                self.creative_risk = min(0.1, self.creative_risk + 0.005)
+                reason = "用户接受Wild Card——创意风险值得"
+            else:
+                # No penalty for trying — that's the contract
+                self.creative_risk = max(0.01, self.creative_risk - 0.002)
+                reason = "用户跳过Wild Card——无惩罚，微调风险偏好"
 
         if reason:
             self._apply_drift(delta_e, delta_w, delta_p, reason)

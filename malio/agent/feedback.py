@@ -7,6 +7,18 @@ import json
 import os
 
 
+STRATEGY_TARGETS = {"genre_boost", "genre_suppress", "energy_bias",
+                   "novelty_bias", "language_bias"}
+
+
+def _is_strategy_rule(rule: dict) -> bool:
+    """Strategy rules affect recommendation, not particles — frontend doesn't need them."""
+    for action in (rule.get("then") if isinstance(rule.get("then"), list) else []):
+        if action.get("target") in STRATEGY_TARGETS:
+            return True
+    return False
+
+
 class Feedback:
     def __init__(self):
         self._connections: List[WebSocket] = []
@@ -69,7 +81,15 @@ class Feedback:
         await self.push_snapshot(agent_log=message)
 
     async def push_rule(self, rule: Dict[str, Any]):
-        """Broadcast a DSL rule to all connected WebSocket clients."""
+        """Broadcast a DSL rule to all connected WebSocket clients.
+
+        Strategy rules (genre_boost, energy_bias, etc.) are server-side only —
+        they affect the recommendation engine, not particle rendering.
+        Skip WebSocket broadcast for those.
+        """
+        if _is_strategy_rule(rule):
+            return  # server-side rule, no frontend broadcast needed
+
         dead = []
         for ws in self._connections:
             try:

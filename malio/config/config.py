@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     
     # Music data
     music_data_path: str = "./data"
+    # Federation — periodic pull from peer instances (disabled when empty)
+    federation_peers: str = ""
+    federation_sync_interval: int = 3600
+
     
     # Model
     kimi_model: str = "kimi-k2.5"
