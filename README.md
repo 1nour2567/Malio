@@ -3,7 +3,6 @@
   <img src="https://img.shields.io/badge/tests-75%20assertions-brightgreen?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge" alt="License">
   <img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python" alt="Python">
-  <img src="https://img.shields.io/badge/IUI-2027%20Demo-ff69b4?style=for-the-badge" alt="IUI 2027">
 </p>
 
 <h1 align="center">🎵 Malio</h1>
@@ -20,7 +19,7 @@
 
 <br>
 
-> **Paper** — IUI 2027 Demo: *"Malio: An Embodied Music AI with Constitutional Agent Architecture"*
+> **Status** — an independent exploration of embodied-agent architecture. No paper has been submitted.
 
 ---
 
@@ -256,5 +255,5 @@ MIT — see [LICENSE](LICENSE) for details.
 ---
 
 <p align="center">
-  <sub>Built with ❤️ for IUI 2027</sub>
+  <sub>An independent exploration of embodied agent architecture.</sub>
 </p>
