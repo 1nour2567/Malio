@@ -2,6 +2,10 @@
 import sys, os, time, random, math
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+# Windows consoles default to GBK, which cannot encode the ✅/❌ markers.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 from agent.persona import PersonaEngine
 
 # Use a fresh engine for each test to avoid state bleed

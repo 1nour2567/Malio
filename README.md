@@ -1,6 +1,6 @@
 <p align="center">
   <img src="https://img.shields.io/badge/status-active-success?style=for-the-badge" alt="Status">
-  <img src="https://img.shields.io/badge/tests-75%20passed-brightgreen?style=for-the-badge" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-75%20assertions-brightgreen?style=for-the-badge" alt="Tests">
   <img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge" alt="License">
   <img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python" alt="Python">
   <img src="https://img.shields.io/badge/IUI-2027%20Demo-ff69b4?style=for-the-badge" alt="IUI 2027">
@@ -161,24 +161,35 @@ NETEASE_API_URL=http://localhost:3000
 
 ## 🧪 Test Suite
 
-<p align="center">
-  <b>75 tests · 0 failures · 100% pass rate</b>
-</p>
-
-| Category | Tests | Status |
-|----------|:-----:|:------:|
-| Smoke tests (httpx + ASGI) | 16 | ✅ |
-| PersonaEngine stress | 24 | ✅ |
-| Skip fatigue precision | 25 | ✅ |
-| Jailbreak immunity | 10 | ✅ |
+**75 assertions total — 63 deterministic, 18 require a live LLM.**
 
 ```bash
 cd malio
-python -m pytest tests/test_smoke.py -v
-python tests/test_persona_stress.py
-python tests/test_skip_fatigue.py
-python tests/test_jailbreak_stress.py
+
+# Deterministic: no API key, no network, ~2.5s
+pytest tests/ -m "not integration"
+
+# Integration: needs DEEPSEEK_API_KEY / KIMI_API_KEY
+pytest tests/ -m integration
 ```
+
+| Suite | Assertions | Needs LLM | Status |
+|-------|:----------:|:---------:|:------:|
+| `test_smoke.py` (pytest) | 16 | 8 of 16 | ✅ |
+| `test_agent_pipeline.py` (pytest) | 6 | — | ✅ |
+| `test_persona_stress.py` (script → wrapped) | 24 | — | ✅ |
+| `test_skip_fatigue.py` (script → wrapped) | 25 | — | ✅ |
+| `test_jailbreak_stress.py` (pytest) | 10 | ✅ | needs key |
+
+The two standalone scripts are executed through `test_stress_scripts.py`, so
+`pytest tests/` covers them and CI can gate on them.
+
+| Category | Assertions | What it covers |
+|----------|:----------:|----------------|
+| Persona stress | 24 | 1000-command floods, boundary clamps, direct LLM override attempts |
+| Skip fatigue precision | 25 | exact trigger threshold (5, not 4 or 6), recovery curve |
+| Smoke + pipeline | 22 | queue bounds, state machine, L2/L3 memory, persona persistence |
+| Jailbreak immunity | 10 | persona cannot be changed by prompts or injection |
 
 ---
 

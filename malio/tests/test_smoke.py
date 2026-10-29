@@ -1,4 +1,9 @@
-"""Smoke tests — core user flows must never break."""
+"""Smoke tests — core user flows must never break.
+
+Two groups:
+  - default (deterministic): run with `pytest -m "not integration"`, no API key needed
+  - integration: hit /api/chat and therefore depend on a live LLM; run with `-m integration`
+"""
 import sys, os, asyncio
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -26,6 +31,7 @@ async def test_root_health():
     assert resp.json()["status"] == "healthy"
 
 
+@pytest.mark.integration
 @pytest.mark.anyio
 async def test_chat_recommend_returns_songs():
     """User asks for recommendation → response + song list returned."""
@@ -39,6 +45,7 @@ async def test_chat_recommend_returns_songs():
     assert isinstance(data["recommendations"], list)
 
 
+@pytest.mark.integration
 @pytest.mark.anyio
 async def test_chat_chat_does_not_crash():
     """Casual chat → valid response, no crash."""
@@ -66,6 +73,7 @@ def test_skip_advances_queue():
     assert ps["index"] == 1
 
 
+@pytest.mark.integration
 @pytest.mark.anyio
 async def test_recommendations_have_required_fields():
     """If recommendations are returned, each song has id/title/artist."""
@@ -77,6 +85,7 @@ async def test_recommendations_have_required_fields():
         assert "title" in song
         assert "artist" in song
 
+@pytest.mark.integration
 @pytest.mark.anyio
 async def test_react_hard_stop():
     """ReAct hard stop: ≥5 songs → 1 round."""
@@ -94,6 +103,7 @@ async def test_react_hard_stop():
     except (FileNotFoundError, IndexError):
         pass  # metrics file may not exist in CI
 
+@pytest.mark.integration
 @pytest.mark.anyio
 async def test_dsl_rule_generation():
     """DSL rule: '以后晚上暗一点' → rule stored."""
@@ -109,6 +119,7 @@ async def test_dsl_rule_generation():
     assert "when" in rule
     assert "then" in rule
 
+@pytest.mark.integration
 @pytest.mark.anyio
 async def test_plan_weather():
     """Plan mode '天气' → instant, no LLM."""
@@ -118,6 +129,7 @@ async def test_plan_weather():
     assert "温度" in data["response"] or "天气" in data["response"]
     assert len(data.get("recommendations", [])) == 0  # weather shouldn't return songs
 
+@pytest.mark.integration
 @pytest.mark.anyio
 async def test_chat_history_accumulates():
     """Consecutive chats → history grows."""
@@ -128,6 +140,7 @@ async def test_chat_history_accumulates():
     ch = get_chat_history(uid)
     assert len(ch) >= 4, f"Expected ≥4 messages (2 exchanges), got {len(ch)}"
 
+@pytest.mark.integration
 @pytest.mark.anyio
 async def test_selected_song_id_consistency():
     """selected_song_id → the spoken song IS the played song."""
