@@ -1,53 +1,62 @@
-# OS generated files
+# ── OS ───────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 
-# Python
+# ── Python ───────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
+*.egg-info/
+build/
+dist/
 
-# Virtual environments
+# ── 虚拟环境 ─────────────────────────────────────────
 venv/
 env/
-.env
-.venv
+.venv/
+.pytest_cache/
 
-# IDE
+# ── IDE ──────────────────────────────────────────────
 .vscode/
 .idea/
 *.sublime-*
 
-# Build artifacts
-build/
-dist/
-*.egg-info/
+# ── 环境变量与密钥 ───────────────────────────────────
+.env
+.env.*
+!.env.example
 
-# Logs
-logs/
-*.log
+# ── 音频资产（版权 + 体积，一律不入库）───────────────
+data/audio/
+malio/data/audio/
+*.flac
+*.mp3
+*.wav
+*.m4a
+*.ogg
 
-# Test coverage
-coverage/
-.coverage
-
-# Database
+# ── 数据与数据库 ─────────────────────────────────────
 *.db
-
-# Frontend
-node_modules/
-frontend/node_modules/
-frontend/dist/
-
-# Local env files
-malio/.env
-data/audio/songs/*.mp3
-data/audio/songs/*.flac
+*.sqlite
+*.sqlite3
 data/sessions/*.json
 data/history/*.jsonl
 data/metrics.csv
 data/user_profile.json
 data/agent_persona.json
-__pycache__/
-*.pyc
-venv/
+
+# ── 日志与覆盖率 ─────────────────────────────────────
+logs/
+*.log
+coverage/
+.coverage
+
+# ── 前端 ─────────────────────────────────────────────
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# ── 本地工具与助手会话产物（不发布） ─────────────────
+.cc-connect/
+.superpowers/
+CLAUDE.md
