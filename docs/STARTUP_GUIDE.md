@@ -1,7 +1,7 @@
 # Malio 启动指南
 
 **最后更新**: 2026-05-20
-**项目路径**: `C:\Users\m1916\Desktop\aimusic\AI_music-master`
+**项目路径**: `<repo-root>`
 
 ---
 
@@ -44,7 +44,7 @@ Frontend Particle Engine ← WebSocket ←── atmosphere / core_actions / rul
 ### 3.1 克隆并进入项目
 
 ```bash
-cd C:\Users\m1916\Desktop\aimusic\AI_music-master
+cd <repo-root>
 ```
 
 ### 3.2 配置 .env 文件
@@ -264,7 +264,7 @@ curl "http://localhost:8007/api/netease/search?query=周杰伦&limit=5"
 
 ## 七、WSL 特殊说明
 
-本项目代码位于 Windows 文件系统 (`C:\Users\m1916\Desktop\aimusic\`)，但通过 WSL 运行。
+本项目代码位于 Windows 文件系统（仓库根目录），但通过 WSL 运行。
 
 ### 端口转发检查
 

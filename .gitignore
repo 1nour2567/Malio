@@ -35,10 +35,13 @@ malio/data/audio/
 *.m4a
 *.ogg
 
-# ── 数据与数据库 ─────────────────────────────────────
+# ── 数据与数据库（运行时数据，不入库）────────────────
 *.db
 *.sqlite
 *.sqlite3
+malio/data/*
+!malio/data/data_importer.py
+!malio/data/__init__.py
 data/sessions/*.json
 data/history/*.jsonl
 data/metrics.csv

@@ -16,6 +16,10 @@
 
 <br>
 
+<p align="center"><img src="constraint-architecture.svg" alt="Constraint Architecture" width="800"></p>
+
+<br>
+
 > **Paper** — IUI 2027 Demo: *"Malio: An Embodied Music AI with Constitutional Agent Architecture"*
 
 ---
